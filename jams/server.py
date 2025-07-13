@@ -771,6 +771,22 @@ class JamServer:
                 room=room_code,
             )
 
+        @self.sio.event
+        def voice_data(sid, data):
+            """Relay voice data to all other clients in the same room."""
+            # Find the room for this sid
+            for room_code, room_data in self.rooms.items():
+                if any(user["sid"] == sid for user in room_data["users"]):
+                    # Relay to all other users in the room
+                    for user in room_data["users"]:
+                        if user["sid"] != sid:
+                            self.sio.emit(
+                                "voice_data",
+                                {"sid": sid, "data": data["data"]},
+                                room=user["sid"],
+                            )
+                    break
+
     def add_song_to_room_queue(self, sid, room_code: str, song_metadata: Dict):
         """Add a song to a room's queue and broadcast the update."""
         if room_code in self.rooms:

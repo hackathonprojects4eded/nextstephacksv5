@@ -8,6 +8,10 @@ from jams.shared.song_queue import SongQueue
 from .constants import WOOD_ENGRAVING_COLOR
 from utils.voice_detector import VoiceDetector, dB_to_amplitude
 from utils.tkinter_compat import set_window_transparency
+import threading
+import pyaudio
+import numpy as np
+import queue
 
 
 class AudioPlayerScreen:
@@ -94,6 +98,16 @@ class AudioPlayerScreen:
         self.voice_detector.start()
         # Ensure detector stops on window close
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        self.voice_stream_thread = None
+        self.voice_streaming = False
+        self.pyaudio_instance = None
+        self.mic_stream = None
+
+        self.voice_playback_thread = None
+        self.voice_playback_queue = queue.Queue()
+        self.voice_playback_running = False
+        self.voice_output_stream = None
 
         self.build_ui()
         self.root.bind("<KeyPress-space>", lambda event: self.toggle_play())
@@ -221,6 +235,20 @@ class AudioPlayerScreen:
             highlightthickness=0,
             takefocus=0,
         ).pack(side=tk.LEFT, padx=10)
+        # Add mute/unmute mic button to the right
+        self.is_muted = False
+        self.mic_btn = tk.Button(
+            control_frame,
+            text="🎤",  # Unmuted icon
+            command=self.toggle_mic,
+            bg=bg_color,
+            fg="white",
+            bd=0,
+            font=("Helvetica", 14),
+            highlightthickness=0,
+            takefocus=0,
+        )
+        self.mic_btn.pack(side=tk.LEFT, padx=10)
         bottom_frame = tk.Frame(frame, bg=bg_color, highlightthickness=0, bd=0)
         bottom_frame.pack(fill=tk.X, padx=10, pady=(5, 10))
         self.time_label_start = tk.Label(
@@ -847,6 +875,132 @@ class AudioPlayerScreen:
                 self.canvas.delete(player["text_id"])
             self.render_player(player)
 
+    def toggle_mic(self):
+        self.is_muted = not self.is_muted
+        if self.is_muted:
+            self.mic_btn.config(text="🔇")  # Muted icon
+            self.stop_voice_stream()
+        else:
+            self.mic_btn.config(text="🎤")  # Unmuted icon
+            self.start_voice_stream()
+
+    def start_voice_stream(self):
+        if self.voice_streaming:
+            return
+        self.voice_streaming = True
+        self.voice_stream_thread = threading.Thread(
+            target=self._voice_stream_loop, daemon=True
+        )
+        self.voice_stream_thread.start()
+
+    def stop_voice_stream(self):
+        self.voice_streaming = False
+        if self.mic_stream:
+            try:
+                self.mic_stream.stop_stream()
+                self.mic_stream.close()
+            except Exception:
+                pass
+            self.mic_stream = None
+        if self.pyaudio_instance:
+            try:
+                self.pyaudio_instance.terminate()
+            except Exception:
+                pass
+            self.pyaudio_instance = None
+
+    def _voice_stream_loop(self):
+        # Basic: capture mic and emit to server
+        try:
+            self.pyaudio_instance = pyaudio.PyAudio()
+            self.mic_stream = self.pyaudio_instance.open(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=16000,
+                input=True,
+                frames_per_buffer=1024,
+            )
+            while self.voice_streaming:
+                data = self.mic_stream.read(1024, exception_on_overflow=False)
+                if (
+                    self.client
+                    and hasattr(self.client, "sio")
+                    and self.client.sio.connected
+                ):
+                    # Send as binary (could also base64 encode if needed)
+                    self.client.sio.emit("voice_data", {"data": data})
+        except Exception as e:
+            print(f"Voice stream error: {e}")
+        finally:
+            if self.mic_stream:
+                try:
+                    self.mic_stream.stop_stream()
+                    self.mic_stream.close()
+                except Exception:
+                    pass
+                self.mic_stream = None
+            if self.pyaudio_instance:
+                try:
+                    self.pyaudio_instance.terminate()
+                except Exception:
+                    pass
+                self.pyaudio_instance = None
+
+    def play_incoming_voice(self, data):
+        # Add received audio data to the playback queue
+        if data:
+            self.voice_playback_queue.put(data)
+            if not self.voice_playback_running:
+                self.start_voice_playback()
+
+    def start_voice_playback(self):
+        if self.voice_playback_running:
+            return
+        self.voice_playback_running = True
+        self.voice_playback_thread = threading.Thread(
+            target=self._voice_playback_loop, daemon=True
+        )
+        self.voice_playback_thread.start()
+
+    def stop_voice_playback(self):
+        self.voice_playback_running = False
+        if self.voice_output_stream:
+            try:
+                self.voice_output_stream.stop_stream()
+                self.voice_output_stream.close()
+            except Exception:
+                pass
+            self.voice_output_stream = None
+
+    def _voice_playback_loop(self):
+        try:
+            p = pyaudio.PyAudio()
+            self.voice_output_stream = p.open(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=16000,
+                output=True,
+                frames_per_buffer=1024,
+            )
+            while self.voice_playback_running:
+                try:
+                    data = self.voice_playback_queue.get(timeout=0.5)
+                    if data:
+                        self.voice_output_stream.write(data)
+                except queue.Empty:
+                    continue
+        except Exception as e:
+            print(f"Voice playback error: {e}")
+        finally:
+            if self.voice_output_stream:
+                try:
+                    self.voice_output_stream.stop_stream()
+                    self.voice_output_stream.close()
+                except Exception:
+                    pass
+                self.voice_output_stream = None
+            self.voice_playback_running = False
+
     def on_close(self):
         # Disconnect client if possible, then destroy window
         try:
@@ -860,4 +1014,6 @@ class AudioPlayerScreen:
             print(f"Error during disconnect: {e}")
         if hasattr(self, "voice_detector"):
             self.voice_detector.stop()
+        self.stop_voice_stream()
+        self.stop_voice_playback()
         self.root.destroy()
