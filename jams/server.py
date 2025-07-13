@@ -1,5 +1,7 @@
 import socketio
 import eventlet
+
+eventlet.monkey_patch()
 from eventlet import wsgi
 import random
 import string

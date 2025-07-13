@@ -18,7 +18,7 @@ class LoadingScreen:
         self.x = x
         self.y = y
 
-        geometry_str = f"250x300+{x}+{y}"
+        geometry_str = f"250x230+{x}+{y}"
         self.root = tk.Toplevel(app.root) if hasattr(app, "root") else tk.Tk()
         self.root.geometry(geometry_str)
         self.root.configure(bg=self.transparent_color)
