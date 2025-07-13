@@ -6,6 +6,7 @@ from utils.song import get_random_song_metadata, get_song_metadata, base64_to_im
 from .queue_screen import FireSideRadioQueueUI
 from jams.shared.song_queue import SongQueue
 from .constants import WOOD_ENGRAVING_COLOR
+from utils.voice_detector import VoiceDetector, dB_to_amplitude
 
 
 class AudioPlayerScreen:
@@ -20,6 +21,7 @@ class AudioPlayerScreen:
 
         # Store client reference for queue synchronization and streaming
         self.client = client
+        self.local_username = getattr(client, "username", None)
 
         self.queue_manager = SongQueue([])
 
@@ -35,6 +37,17 @@ class AudioPlayerScreen:
         except Exception as e:
             print(f"Could not load fire images: {e}")
             self.fire_images = []
+
+        # Load notes animation images
+        self.notes_images = []
+        try:
+            for i in range(1, 4):
+                notes_img = Image.open(f"assets/notes/Notes_{i}.png")
+                notes_tk = ImageTk.PhotoImage(notes_img)
+                self.notes_images.append(notes_tk)
+        except Exception as e:
+            print(f"Could not load notes images: {e}")
+            self.notes_images = []
 
         # Initialize streaming state
         self.is_playing = False
@@ -69,6 +82,17 @@ class AudioPlayerScreen:
             3: 2,
         }  # Array index to relative position
         self.player_images = {}  # Cache for player images
+
+        self.is_talking = False  # Track if local user is talking
+        # Voice detection threshold in dB (adjust as needed)
+        self.voice_threshold_db = -30  # Typical values: -40 (quiet) to -20 (loud)
+        self.voice_threshold = dB_to_amplitude(self.voice_threshold_db)
+        self.voice_detector = VoiceDetector(
+            threshold=self.voice_threshold, callback=self._on_voice_state_change
+        )
+        self.voice_detector.start()
+        # Ensure detector stops on window close
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self.build_ui()
         self.root.bind("<KeyPress-space>", lambda event: self.toggle_play())
@@ -314,6 +338,14 @@ class AudioPlayerScreen:
         else:
             self.fire_image_id = None
 
+        # Create notes image at (0,0) anchor nw
+        if self.notes_images:
+            self.notes_image_id = self.canvas.create_image(
+                0, 0, anchor="nw", image=self.notes_images[0]
+            )
+        else:
+            self.notes_image_id = None
+
         # Load and position the box image
         try:
             box_img = Image.open("assets/other/Box.png")
@@ -334,6 +366,8 @@ class AudioPlayerScreen:
 
         # Start fire animation
         self.animate_fire()
+        # Start notes animation
+        self.animate_notes()
 
     def start_move(self, event):
         self._drag_start_pointer_x = self.root.winfo_pointerx()
@@ -623,6 +657,16 @@ class AudioPlayerScreen:
         # Continue animation
         self.root.after(200, lambda: self.animate_fire(frame + 1))
 
+    def animate_notes(self, frame=0):
+        """Animate the notes by cycling through the notes images."""
+        if self.notes_images and self.notes_image_id:
+            current_frame = frame % len(self.notes_images)
+            self.canvas.itemconfig(
+                self.notes_image_id, image=self.notes_images[current_frame]
+            )
+            self.root.update()
+        self.root.after(200, lambda: self.animate_notes(frame + 1))
+
     def add_player(self, username, color_idx, position_idx):
         """Add a player to the room."""
         from custom_classes.custom_color import Color
@@ -676,11 +720,14 @@ class AudioPlayerScreen:
         else:
             image_type = "R"  # Right
 
-        # Construct image filename
-        image_name = f"H{image_type}C{color.color_index + 1}"  # H for happy, L/R for position, C for closed mouth, 1 for random number
-        image_path = (
-            f"assets/players/{color.color_name}/{image_name}-removebg-preview.png"
-        )
+        # Determine mouth state for local user
+        is_local = player.get("username") == self.local_username
+        mouth = "O" if (is_local and self.is_talking) else "C"
+        image_name = f"H{image_type}{mouth}{color.color_index + 1}"
+        # image_path = (
+        #     f"assets/players/{color.color_name}/{image_name}-removebg-preview.png"
+        # )
+        image_path = f"assets/allplayers/{image_name}.png"
 
         try:
             # Load and cache image
@@ -709,9 +756,9 @@ class AudioPlayerScreen:
                 anchor="s",  # Anchor at bottom so text appears above player
             )
 
-            print(
-                f"Rendered {player['username']} at ({x}, {y}) with image {image_name}"
-            )
+            # print(
+            #     f"Rendered {player['username']} at ({x}, {y}) with image {image_name}"
+            # )
 
         except Exception as e:
             print(f"Error rendering player {player['username']}: {e}")
@@ -739,3 +786,34 @@ class AudioPlayerScreen:
             self.add_player(player_data["username"], player_data["color_idx"], position)
 
         print(f"AudioPlayerScreen: Final players count: {len(self.players)}")
+
+    def get_local_player(self):
+        self.local_username = getattr(self.client, "username", None)
+        if not self.local_username:
+            return None
+        for player in self.players:
+
+            if player.get("username") == self.local_username:
+
+                return player
+        return None
+
+    def _on_voice_state_change(self, is_talking):
+        self.is_talking = is_talking
+        # Redraw local player with new mouth state
+        self._update_local_player_mouth()
+
+    def _update_local_player_mouth(self):
+        # Find local user by username
+        player = self.get_local_player()
+        if player:
+            if player.get("canvas_id"):
+                self.canvas.delete(player["canvas_id"])
+            if player.get("text_id"):
+                self.canvas.delete(player["text_id"])
+            self.render_player(player)
+
+    def _on_close(self):
+        if hasattr(self, "voice_detector"):
+            self.voice_detector.stop()
+        self.root.destroy()
