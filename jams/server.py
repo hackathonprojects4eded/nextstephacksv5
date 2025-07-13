@@ -14,6 +14,7 @@ import numpy as np
 
 sys.path.append(".")
 from utils.song import get_song_metadata
+from screens.constants import LOCAL_IP, LOCAL_PORT
 
 
 class JamServer:
@@ -1016,16 +1017,14 @@ class JamServer:
         """Get information about all rooms."""
         return self.rooms
 
-    def run(self, host="0.0.0.0", port=5000):
+    def run(self, host="0.0.0.0", port=None):
         """Start the server."""
         # Try to get the local IPv4 address for LAN access
         import socket
 
-        try:
-            # hostname = socket.gethostname()
-            local_ip = "192.168.86.111"
-        except Exception:
-            local_ip = None
+        if port is None:
+            port = LOCAL_PORT
+        local_ip = LOCAL_IP
 
         print(f"Starting Jam Server on {host}:{port}")
         if host == "0.0.0.0":

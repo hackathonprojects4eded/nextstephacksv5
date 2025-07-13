@@ -1,5 +1,5 @@
 import tkinter as tk
-from .constants import WOOD_COLOR, WOOD_ENGRAVING_COLOR
+from .constants import WOOD_COLOR, WOOD_ENGRAVING_COLOR, LOCAL_IP, LOCAL_PORT
 from .joinhostcode import JoinHostCodeScreen
 from utils.tkinter_compat import set_window_transparency
 
@@ -210,7 +210,9 @@ class LoadingScreen:
                 max_retries = 5  # Increased retries
                 for attempt in range(max_retries):
                     try:
-                        if self.client.connect_to_server("http://169.254.100.138:5000"):
+                        if self.client.connect_to_server(
+                            f"http://{LOCAL_IP}:{LOCAL_PORT}"
+                        ):
                             self.root.after(
                                 0, lambda: self.update_progress("Connected to server")
                             )

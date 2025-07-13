@@ -8,6 +8,7 @@ import base64
 import io
 import wave
 import time
+from screens.constants import LOCAL_IP, LOCAL_PORT
 
 
 class Client:
@@ -503,8 +504,10 @@ class Client:
             )
             return True
 
-    def connect_to_server(self, server_url="http://169.254.100.138:5000"):
+    def connect_to_server(self, server_url=None):
         """Connect to the socket server."""
+        if server_url is None:
+            server_url = f"http://{LOCAL_IP}:{LOCAL_PORT}"
         try:
             self.sio.connect(server_url, wait_timeout=10)
             return True

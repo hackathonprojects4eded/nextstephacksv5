@@ -1,5 +1,11 @@
 import tkinter as tk
-from .constants import WOOD_COLOR, WOOD_ENGRAVING_COLOR, WOOD_ENTER_USERNAME_COLOR
+from .constants import (
+    WOOD_COLOR,
+    WOOD_ENGRAVING_COLOR,
+    WOOD_ENTER_USERNAME_COLOR,
+    LOCAL_IP,
+    LOCAL_PORT,
+)
 from utils.tkinter_compat import set_window_transparency
 
 
@@ -273,7 +279,7 @@ class JoinHostCodeScreen:
             print(f"Client not connected, attempting to connect...")
 
             # Try to connect to existing server first
-            if not self.client.connect_to_server("http://169.254.100.138:5000"):
+            if not self.client.connect_to_server(f"http://{LOCAL_IP}:{LOCAL_PORT}"):
                 print("No existing server found, starting new server...")
                 self.update_join_status("Starting server...")
 
@@ -296,7 +302,7 @@ class JoinHostCodeScreen:
                 time.sleep(2)
 
                 # Try connecting again
-                if not self.client.connect_to_server("http://169.254.100.138:5000"):
+                if not self.client.connect_to_server(f"http://{LOCAL_IP}:{LOCAL_PORT}"):
                     self.update_join_status("Failed to connect to server")
                     print("Failed to connect to server")
                     return

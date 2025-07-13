@@ -61,3 +61,6 @@ nouns = [
     "Tempo",
     "Mix",
 ]
+
+LOCAL_IP = "192.168.86.111"
+LOCAL_PORT = 5000
