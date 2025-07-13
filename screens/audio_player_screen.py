@@ -303,7 +303,7 @@ class AudioPlayerScreen:
                 self, client=self.client
             ),
         )
-        # self.queue_ui.show()  # Removed for Mac compatibility
+        self.queue_ui.show()
 
     def handle_url_add(self, url):
         """Handle URL addition with download state management."""

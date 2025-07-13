@@ -1037,7 +1037,7 @@ class JamServer:
             print(f"[INFO] Server accessible at http://{host}:{port}")
 
         # Start Socket.IO server
-        wsgi.server(eventlet.listen((host, port)), self.app)
+        wsgi.server(eventlet.listen((host, port)), self.app, log_output=False)
 
 
 if __name__ == "__main__":
