@@ -10,6 +10,7 @@ from .constants import (
 )
 from custom_classes.custom_color import Color
 from .joinhostcode import JoinHostCodeScreen
+from utils.tkinter_compat import set_window_transparency
 
 import random
 
@@ -39,8 +40,8 @@ class CharacterScreen:
         self.root = tk.Toplevel(app.root) if hasattr(app, "root") else tk.Tk()
         self.root.geometry(geometry_str)
         self.root.configure(bg=self.transparent_color)
+        set_window_transparency(self.root, color=self.transparent_color, alpha=0.8)
         self.root.overrideredirect(True)
-        self.root.wm_attributes("-transparentcolor", self.transparent_color)
         self.root.wm_attributes("-topmost", True)
 
         self._drag_start_pointer_x = 0

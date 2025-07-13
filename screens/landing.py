@@ -1,6 +1,7 @@
 import tkinter as tk
 from .constants import WOOD_COLOR, WOOD_ENGRAVING_COLOR
 from .character import CharacterScreen
+from utils.tkinter_compat import set_window_transparency
 
 
 class LandingScreen:
@@ -33,8 +34,8 @@ class LandingScreen:
         self.root = tk.Toplevel(app.root) if hasattr(app, "root") else tk.Tk()
         self.root.geometry(geometry_str)
         self.root.configure(bg=self.transparent_color)
+        set_window_transparency(self.root, color=self.transparent_color, alpha=0.8)
         self.root.overrideredirect(True)
-        self.root.wm_attributes("-transparentcolor", self.transparent_color)
         self.root.wm_attributes("-topmost", True)
 
         # Window move support

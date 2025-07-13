@@ -7,6 +7,7 @@ from .queue_screen import FireSideRadioQueueUI
 from jams.shared.song_queue import SongQueue
 from .constants import WOOD_ENGRAVING_COLOR
 from utils.voice_detector import VoiceDetector, dB_to_amplitude
+from utils.tkinter_compat import set_window_transparency
 
 
 class AudioPlayerScreen:
@@ -15,7 +16,7 @@ class AudioPlayerScreen:
         self.transparent_color = "black"
         self.root.geometry("550x400")
         self.root.overrideredirect(True)
-        self.root.wm_attributes("-transparentcolor", self.transparent_color)
+        set_window_transparency(self.root, color=self.transparent_color, alpha=0.8)
         self.root.wm_attributes("-topmost", True)
         self.root.configure(bg=self.transparent_color)
 
