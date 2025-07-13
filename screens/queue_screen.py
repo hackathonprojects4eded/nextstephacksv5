@@ -3,27 +3,27 @@ from PIL import Image, ImageTk
 import os
 from utils.song import get_song_metadata, base64_to_image
 from .constants import *
+from jams.shared.song_queue import SongQueue
 
 
 class FireSideRadioQueueUI:
     def __init__(
         self,
-        client,
+        queue_manager,
         master=None,
         on_thumbnail_click=None,
         on_add_url=None,
         on_shuffle_queue=None,
     ):
-        self.client = client
+        self.queue_manager = queue_manager
         self.on_thumbnail_click = on_thumbnail_click
         self.on_add_url = on_add_url
         self.on_shuffle_queue = on_shuffle_queue
         self.win = tk.Toplevel(master)
         self.win.geometry("200x300")
         self.win.configure(bg=WOOD_COLOR)
-        self.win.overrideredirect(True)
+        self.win.overrideredirect(True)  # Remove OS top bar
         self.win.wm_attributes("-topmost", True)
-
         # Center the window over the master (main window)
         if master is not None:
             master.update_idletasks()
@@ -35,7 +35,6 @@ class FireSideRadioQueueUI:
             x = master_x + (master_w - win_w) // 2
             y = master_y + (master_h - win_h) // 2
             self.win.geometry(f"{win_w}x{win_h}+{x}+{y}")
-
         # Custom top bar
         self.top_bar = tk.Frame(self.win, bg="#5A2B1A", height=28)
         self.top_bar.pack(fill=tk.X, side=tk.TOP)
@@ -62,7 +61,6 @@ class FireSideRadioQueueUI:
             takefocus=0,
         )
         self.close_btn.pack(side=tk.RIGHT, padx=4)
-
         # Dragging support on the top bar
         self.top_bar.bind("<Button-1>", self.start_move)
         self.top_bar.bind("<B1-Motion>", self.do_move)
@@ -85,9 +83,8 @@ class FireSideRadioQueueUI:
         )
         self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.thumbnail_images = []
+        self.thumbnail_images = []  # Keep references to avoid garbage collection
         self.display_queue()
-
         # Bind mouse wheel to scroll
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
@@ -144,9 +141,9 @@ class FireSideRadioQueueUI:
         self.add_btn = tk.Button(
             self.add_bar,
             text="Add",
-            font=("Helvetica", 7),
+            font=("Helvetica", 7),  # Slightly smaller font
             width=6,
-            height=1,
+            height=1,  # Smaller height
             command=self.handle_add_url,
             bg="white",
             fg="black",
@@ -176,17 +173,14 @@ class FireSideRadioQueueUI:
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
 
-        if not self.client:
-            return
-
         start_idx = (
-            self.client.current_song_index + 1
-            if self.client.current_song_index >= 0
+            self.queue_manager.current_idx + 1
+            if hasattr(self.queue_manager, "current_idx")
             else 0
         )
 
-        for pp in range(start_idx, len(self.client.queue)):
-            item = self.client.queue[pp]
+        for pp in range(start_idx, len(self.queue_manager.queue)):
+            item = self.queue_manager.queue[pp]
             self.create_list_tile(pp, item)
 
     def create_list_tile(self, idx, item):
@@ -194,8 +188,7 @@ class FireSideRadioQueueUI:
         max_author_chars = 13
         row = tk.Frame(self.scrollable_frame, bg=WOOD_COLOR, cursor="hand2")
         row.pack(fill=tk.X, pady=2, padx=4)
-
-        # Spotify-style thumbnail with overlay and play icon
+        # --- Spotify-style thumbnail with overlay and play icon ---
         thumb_container = tk.Frame(row, width=40, height=40, bg=WOOD_COLOR)
         thumb_container.pack_propagate(False)
         thumb_container.pack(side=tk.LEFT, padx=(0, 6))
@@ -203,7 +196,7 @@ class FireSideRadioQueueUI:
         thumb_label.place(x=0, y=0, width=40, height=40)
         overlay = tk.Label(thumb_container, bg="#FFFFFF", width=40, height=40)
         overlay.place(x=0, y=0, width=40, height=40)
-        overlay.lower()
+        overlay.lower()  # Hide overlay by default
         overlay.place_forget()
         play_icon = tk.Label(
             overlay,
@@ -242,6 +235,7 @@ class FireSideRadioQueueUI:
 
         # Use metadata from the queue item (from server)
         if item.get("cover_image"):
+            # Cover image is base64 string from server, convert back to PIL Image
             try:
                 img = base64_to_image(item["cover_image"])
                 if img:
@@ -256,9 +250,11 @@ class FireSideRadioQueueUI:
                 title = item.get("title", item.get("name", ""))
                 author = item.get("artist", "")
         elif "filepath" in item and os.path.exists(item["filepath"]):
+            # Fallback: extract from local file
             try:
                 meta = get_song_metadata(item["filepath"])
                 if meta.get("cover_image"):
+                    # Convert base64 back to image
                     img = base64_to_image(meta["cover_image"])
                     if img:
                         img = img.resize((40, 40))
@@ -274,7 +270,6 @@ class FireSideRadioQueueUI:
             thumb_label.config(text="🌐", font=("Helvetica", 7))
             title = "Online Stream"
             author = "DJ Web"
-
         # Info (title, author)
         info_frame = tk.Frame(row, bg=WOOD_COLOR)
         info_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
@@ -302,11 +297,9 @@ class FireSideRadioQueueUI:
             justify="left",
         )
         author_label.pack(anchor="w", pady=0, fill="x")
-
         # Thumbnail click: play and remove
         play_icon.bind("<Button-1>", lambda e, i=idx: self.handle_thumbnail_click(i))
         overlay.bind("<Button-1>", lambda e, i=idx: self.handle_thumbnail_click(i))
-
         # Three-dot menu button (anchor right)
         menu_btn = tk.Button(
             row,
@@ -334,13 +327,18 @@ class FireSideRadioQueueUI:
         menu.tk_popup(event.x_root, event.y_root)
 
     def remove_from_queue(self, idx):
-        if self.client:
-            self.client.remove_song_from_queue(idx)
+        self.queue_manager.remove_from_queue(idx)
+        # Sync with server if possible
+        app = getattr(self, "app", None)
+        client = getattr(app, "client", None) if app else None
+        if client and hasattr(client, "sync_queue_with_server"):
+            client.sync_queue_with_server(self.queue_manager.queue)
         self.display_queue()
 
     def handle_thumbnail_click(self, idx):
         if self.on_thumbnail_click:
             self.on_thumbnail_click(idx)
+
         print(f"List thumbnail clicked: {idx}")
 
     def start_move(self, event):
