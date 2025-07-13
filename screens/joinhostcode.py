@@ -28,7 +28,7 @@ class JoinHostCodeScreen:
         if sys.platform != "darwin":
             self.root.overrideredirect(True)
         else:
-            self.root.title("FIre Jams")
+            self.root.title("Fire Jams")
 
         self.root.wm_attributes("-topmost", True)
 
