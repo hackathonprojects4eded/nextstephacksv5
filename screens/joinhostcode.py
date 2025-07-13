@@ -82,9 +82,19 @@ class JoinHostCodeScreen:
             220, 10, anchor="nw", window=self.close_btn, width=20, height=20
         )
 
-        # Bind window move to entire canvas, but skip if clicking on Entry
-        self.canvas.bind("<Button-1>", self.start_move)
-        self.canvas.bind("<B1-Motion>", self.do_move)
+        # Add a small draggable square (handle) next to the close button
+        self.drag_handle = self.canvas.create_rectangle(
+            200,
+            10,
+            218,
+            28,
+            fill=WOOD_ENGRAVING_COLOR,
+            outline="#555555",
+            width=1,
+            tags="drag_handle",
+        )
+        self.canvas.tag_bind("drag_handle", "<Button-1>", self.start_move)
+        self.canvas.tag_bind("drag_handle", "<B1-Motion>", self.do_move)
 
         # Code entry box (inside polygon/rectangle) - only for join mode
         # Polygon: [61, 97, 181, 91, 182, 108, 64, 111]
