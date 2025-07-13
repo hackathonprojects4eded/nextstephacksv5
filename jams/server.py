@@ -1,22 +1,18 @@
 import socketio
-from wsgiref import simple_server
 import random
 import string
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 import os
 import json
-import asyncio
 import subprocess
 import threading
-from urllib.parse import urlparse
 import time
-import wave
-import pyaudio
-import io
 import base64
 from pydub import AudioSegment
 import sys
 import numpy as np
+from gevent import pywsgi
+from geventwebsocket.handler import WebSocketHandler
 
 sys.path.append(".")
 from utils.song import get_song_metadata
@@ -1015,8 +1011,9 @@ class JamServer:
     def run(self, host="0.0.0.0", port=5000):
         """Start the server."""
         print(f"Starting Jam Server on {host}:{port}")
-        # Start Socket.IO server using wsgiref
-        server = simple_server.make_server(host, port, self.app)
+        server = pywsgi.WSGIServer(
+            (host, port), self.app, handler_class=WebSocketHandler
+        )
         server.serve_forever()
 
 
