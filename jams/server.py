@@ -1,8 +1,5 @@
-import eventlet
-
-eventlet.monkey_patch()
 import socketio
-from eventlet import wsgi
+from wsgiref import simple_server
 import random
 import string
 from typing import Dict, List, Optional
@@ -32,7 +29,7 @@ class JamServer:
     """
 
     def __init__(self):
-        self.sio = socketio.Server(cors_allowed_origins="*")
+        self.sio = socketio.Server(cors_allowed_origins="*", async_mode="threading")
         self.app = socketio.WSGIApp(self.sio)
 
         # Store room data: {room_code: {users: [], queue: [], host: str, current_idx: int}}
@@ -461,22 +458,19 @@ class JamServer:
 
                         # Non-blocking wait for process completion
                         while process.poll() is None:
-                            eventlet.sleep(0)  # Yield control to eventlet
+                            time.sleep(0.01)  # Yield control
 
                         stdout, stderr = process.communicate()
 
                         if process.returncode != 0:
                             print(f"Download failed: {stderr}")
-                            eventlet.spawn_after(
-                                0,
-                                lambda: self.sio.emit(
-                                    "url_processed",
-                                    {
-                                        "status": "error",
-                                        "message": "Failed to download song",
-                                    },
-                                    room=sid,
-                                ),
+                            self.sio.emit(
+                                "url_processed",
+                                {
+                                    "status": "error",
+                                    "message": "Failed to download song",
+                                },
+                                room=sid,
                             )
                             return
 
@@ -546,63 +540,50 @@ class JamServer:
                                 self.add_song_to_room_queue(
                                     sid, room_code, merged_metadata
                                 )
-                                eventlet.spawn_after(
-                                    0,
-                                    lambda: self.sio.emit(
-                                        "url_processed",
-                                        {
-                                            "status": "success",
-                                            "message": "Song downloaded and added to queue",
-                                            "song": merged_metadata,
-                                        },
-                                        room=sid,
-                                    ),
+                                self.sio.emit(
+                                    "url_processed",
+                                    {
+                                        "status": "success",
+                                        "message": "Song downloaded and added to queue",
+                                        "song": merged_metadata,
+                                    },
+                                    room=sid,
                                 )
                             else:
                                 print(
                                     f"Downloaded file not found for song: {metadata['name']}"
                                 )
-                                eventlet.spawn_after(
-                                    0,
-                                    lambda: self.sio.emit(
-                                        "url_processed",
-                                        {
-                                            "status": "error",
-                                            "message": "Downloaded file not found",
-                                        },
-                                        room=sid,
-                                    ),
-                                )
-                        else:
-                            eventlet.spawn_after(
-                                0,
-                                lambda: self.sio.emit(
+                                self.sio.emit(
                                     "url_processed",
                                     {
                                         "status": "error",
-                                        "message": "Metadata file not found",
+                                        "message": "Downloaded file not found",
                                     },
                                     room=sid,
-                                ),
+                                )
+                        else:
+                            self.sio.emit(
+                                "url_processed",
+                                {
+                                    "status": "error",
+                                    "message": "Metadata file not found",
+                                },
+                                room=sid,
                             )
 
                     except Exception as e:
                         print(f"Error processing URL: {e}")
-                        eventlet.spawn_after(
-                            0,
-                            lambda: self.sio.emit(
-                                "url_processed",
-                                {
-                                    "status": "error",
-                                    "message": f"Error processing URL",
-                                },
-                                room=sid,
-                            ),
+                        self.sio.emit(
+                            "url_processed",
+                            {
+                                "status": "error",
+                                "message": f"Error processing URL",
+                            },
+                            room=sid,
                         )
 
-                # Start download in eventlet thread (non-blocking)
-                eventlet.spawn(download_and_notify)
-
+                # Start download in background thread (non-blocking)
+                threading.Thread(target=download_and_notify, daemon=True).start()
                 # Notify client that download started
                 self.sio.emit(
                     "url_processing", {"message": "Downloading song..."}, room=sid
@@ -611,8 +592,12 @@ class JamServer:
         @self.sio.event
         def sync_queue_with_friends(sid, data):
             """Sync queue changes with all users in the room."""
-            # Use eventlet to handle this event asynchronously
-            eventlet.spawn(self._handle_sync_queue_with_friends, sid, data)
+            # Use a background thread to handle this event asynchronously
+            threading.Thread(
+                target=self._handle_sync_queue_with_friends,
+                args=(sid, data),
+                daemon=True,
+            ).start()
 
         @self.sio.event
         def sync_current_index(sid, data):
@@ -669,8 +654,10 @@ class JamServer:
         @self.sio.event
         def play_song(sid, data):
             """Start playing a song in a room."""
-            # Use eventlet to handle this event asynchronously
-            eventlet.spawn(self._handle_play_song, sid, data)
+            # Use a background thread to handle this event asynchronously
+            threading.Thread(
+                target=self._handle_play_song, args=(sid, data), daemon=True
+            ).start()
 
         @self.sio.event
         def pause_stream(sid, data):
@@ -1028,9 +1015,9 @@ class JamServer:
     def run(self, host="0.0.0.0", port=5000):
         """Start the server."""
         print(f"Starting Jam Server on {host}:{port}")
-
-        # Start Socket.IO server
-        wsgi.server(eventlet.listen((host, port)), self.app)
+        # Start Socket.IO server using wsgiref
+        server = simple_server.make_server(host, port, self.app)
+        server.serve_forever()
 
 
 if __name__ == "__main__":
