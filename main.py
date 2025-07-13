@@ -14,6 +14,15 @@ if __name__ == "__main__":
         client = Client(root, None)
         landing = LandingScreen(client)
 
+        def on_close():
+            try:
+                if hasattr(client, "sio") and client.sio.connected:
+                    client.sio.disconnect()
+            except Exception as e:
+                print(f"Error during disconnect: {e}")
+            root.destroy()
+
+        root.protocol("WM_DELETE_WINDOW", on_close)
         root.mainloop()
     except Exception as e:
         messagebox.showerror("Error", str(e))
