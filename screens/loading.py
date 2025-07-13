@@ -189,7 +189,7 @@ class LoadingScreen:
                 def start_server():
                     try:
                         server = JamServer()
-                        server.run(host="localhost", port=5000)
+                        server.run(host="0.0.0.0", port=5000)
                     except Exception as e:
                         print(f"Server error: {e}")
 
@@ -209,7 +209,7 @@ class LoadingScreen:
                 max_retries = 5  # Increased retries
                 for attempt in range(max_retries):
                     try:
-                        if self.client.connect_to_server("http://localhost:5000"):
+                        if self.client.connect_to_server("http://169.254.100.138:5000"):
                             self.root.after(
                                 0, lambda: self.update_progress("Connected to server")
                             )

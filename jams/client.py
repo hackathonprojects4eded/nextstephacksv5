@@ -503,7 +503,7 @@ class Client:
             )
             return True
 
-    def connect_to_server(self, server_url="http://localhost:5000"):
+    def connect_to_server(self, server_url="http://169.254.100.138:5000"):
         """Connect to the socket server."""
         try:
             self.sio.connect(server_url, wait_timeout=10)

@@ -1018,7 +1018,24 @@ class JamServer:
 
     def run(self, host="0.0.0.0", port=5000):
         """Start the server."""
+        # Try to get the local IPv4 address for LAN access
+        import socket
+
+        try:
+            hostname = socket.gethostname()
+            local_ip = socket.gethostbyname(hostname)
+        except Exception:
+            local_ip = None
+
         print(f"Starting Jam Server on {host}:{port}")
+        if host == "0.0.0.0":
+            print("[INFO] To connect from another device on your network, use:")
+            if local_ip and not local_ip.startswith("127."):
+                print(f"  http://{local_ip}:{port}")
+            else:
+                print("  [Replace with your LAN IPv4 address]")
+        else:
+            print(f"[INFO] Server accessible at http://{host}:{port}")
 
         # Start Socket.IO server
         wsgi.server(eventlet.listen((host, port)), self.app)
