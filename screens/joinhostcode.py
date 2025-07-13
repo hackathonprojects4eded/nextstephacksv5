@@ -82,7 +82,7 @@ class JoinHostCodeScreen:
             220, 10, anchor="nw", window=self.close_btn, width=20, height=20
         )
 
-        # Bind window move to entire canvas
+        # Bind window move to entire canvas, but skip if clicking on Entry
         self.canvas.bind("<Button-1>", self.start_move)
         self.canvas.bind("<B1-Motion>", self.do_move)
 
@@ -186,7 +186,10 @@ class JoinHostCodeScreen:
             self.check_for_room_code()
 
     def start_move(self, event):
-        # Allow dragging from anywhere on the canvas, not just top 40px
+        # Prevent drag if clicking on the Entry widget (join code box)
+        widget = event.widget.winfo_containing(event.x_root, event.y_root)
+        if hasattr(self, "code_entry") and widget == self.code_entry:
+            return  # Don't start drag if clicking on the Entry
         self._drag_start_pointer_x = self.root.winfo_pointerx()
         self._drag_start_pointer_y = self.root.winfo_pointery()
         self._drag_start_win_x = self.root.winfo_x()
