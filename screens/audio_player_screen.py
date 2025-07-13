@@ -700,6 +700,20 @@ class AudioPlayerScreen:
                 print(f"Removed player {username}")
                 break
 
+    def update_remote_talking_state(self, username, is_talking):
+        # Find the player by username
+        for player in self.players:
+            if player.get("username") == username:
+                player["is_talking"] = is_talking
+                # Remove old image/text
+                if player.get("canvas_id"):
+                    self.canvas.delete(player["canvas_id"])
+                if player.get("text_id"):
+                    self.canvas.delete(player["text_id"])
+                # Re-render with new mouth state
+                self.render_player(player)
+                break
+
     def render_player(self, player):
         """Render a player on the canvas."""
         position_idx = player["position_idx"]
@@ -720,9 +734,13 @@ class AudioPlayerScreen:
         else:
             image_type = "R"  # Right
 
-        # Determine mouth state for local user
+        # Determine mouth state for local user or remote
         is_local = player.get("username") == self.local_username
-        mouth = "O" if (is_local and self.is_talking) else "C"
+        # For remote, use player['is_talking'] if present
+        if is_local:
+            mouth = "O" if self.is_talking else "C"
+        else:
+            mouth = "O" if player.get("is_talking", False) else "C"
         image_name = f"H{image_type}{mouth}{color.color_index + 1}"
         # image_path = (
         #     f"assets/players/{color.color_name}/{image_name}-removebg-preview.png"
@@ -802,6 +820,21 @@ class AudioPlayerScreen:
         self.is_talking = is_talking
         # Redraw local player with new mouth state
         self._update_local_player_mouth()
+        # Emit talking state to server for relay
+        if (
+            self.client
+            and hasattr(self.client, "sio")
+            and self.client.room_code
+            and self.local_username
+        ):
+            self.client.sio.emit(
+                "user_talking_state",
+                {
+                    "room_code": self.client.room_code,
+                    "username": self.local_username,
+                    "is_talking": int(is_talking),
+                },
+            )
 
     def _update_local_player_mouth(self):
         # Find local user by username

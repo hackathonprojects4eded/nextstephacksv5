@@ -454,6 +454,14 @@ class Client:
             )
             self.request_next_chunk(room_code, chunk_index)
 
+        @self.sio.event
+        def user_talking_update(data):
+            """Update a player's talking state in the UI when received from server."""
+            username = data.get("username")
+            is_talking = bool(data.get("is_talking", 0))
+            if hasattr(self.audio_player, "update_remote_talking_state"):
+                self.audio_player.update_remote_talking_state(username, is_talking)
+
     def create_room(self, username, color):
         """Create a new jam room as host."""
         with self.socket_lock:

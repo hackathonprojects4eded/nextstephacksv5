@@ -761,6 +761,22 @@ class JamServer:
 
                 # Don't send audio chunk here - let clients request it when ready
 
+        @self.sio.event
+        def user_talking_state(sid, data):
+            """Handle user talking state updates and broadcast to room."""
+            room_code = data.get("room_code")
+            username = data.get("username")
+            is_talking = bool(data.get("is_talking", 0))
+            if not room_code or not username:
+                return
+            # Optionally: update server-side state if you want to track who is talking
+            # Broadcast to all users in the room
+            self.sio.emit(
+                "user_talking_update",
+                {"username": username, "is_talking": is_talking},
+                room=room_code,
+            )
+
     def add_song_to_room_queue(self, sid, room_code: str, song_metadata: Dict):
         """Add a song to a room's queue and broadcast the update."""
         if room_code in self.rooms:
