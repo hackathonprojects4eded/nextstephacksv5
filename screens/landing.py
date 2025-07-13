@@ -72,7 +72,7 @@ class LandingScreen:
         self.close_btn = tk.Button(
             self.canvas,
             text="❎",
-            command=self.root.destroy,
+            command=self.on_close,
             bg=WOOD_ENGRAVING_COLOR,
             fg="white",
             bd=0,
@@ -170,3 +170,16 @@ class LandingScreen:
 
     def on_host(self, event=None):
         self.go_to_character_screen(is_host=True)
+
+    def on_close(self):
+        # Disconnect client if possible, then destroy window
+        try:
+            if (
+                hasattr(self.app, "client")
+                and hasattr(self.app.client, "sio")
+                and self.app.client.sio.connected
+            ):
+                self.app.client.sio.disconnect()
+        except Exception as e:
+            print(f"Error during disconnect: {e}")
+        self.root.destroy()

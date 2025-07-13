@@ -77,7 +77,7 @@ class LoadingScreen:
         self.close_btn = tk.Button(
             self.canvas,
             text="❎",
-            command=self.root.destroy,
+            command=self.on_close,
             bg=WOOD_ENGRAVING_COLOR,
             fg="white",
             bd=0,
@@ -278,3 +278,12 @@ class LoadingScreen:
             x=x,
             y=y,
         )
+
+    def on_close(self):
+        # Disconnect client if possible, then destroy window
+        try:
+            if hasattr(self.client, "sio") and self.client.sio.connected:
+                self.client.sio.disconnect()
+        except Exception as e:
+            print(f"Error during disconnect: {e}")
+        self.root.destroy()

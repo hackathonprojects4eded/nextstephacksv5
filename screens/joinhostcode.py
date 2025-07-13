@@ -83,7 +83,7 @@ class JoinHostCodeScreen:
         self.close_btn = tk.Button(
             self.canvas,
             text="❎",
-            command=self.root.destroy,
+            command=self.on_close,
             activebackground=WOOD_ENGRAVING_COLOR,
             bg=WOOD_ENGRAVING_COLOR,
             fg="white",
@@ -366,3 +366,12 @@ class JoinHostCodeScreen:
 
         # Schedule next check
         self.root.after(100, self.check_for_room_code)
+
+    def on_close(self):
+        # Disconnect client if possible, then destroy window
+        try:
+            if hasattr(self.client, "sio") and self.client.sio.connected:
+                self.client.sio.disconnect()
+        except Exception as e:
+            print(f"Error during disconnect: {e}")
+        self.root.destroy()

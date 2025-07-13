@@ -93,7 +93,7 @@ class AudioPlayerScreen:
         )
         self.voice_detector.start()
         # Ensure detector stops on window close
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.build_ui()
         self.root.bind("<KeyPress-space>", lambda event: self.toggle_play())
@@ -174,7 +174,7 @@ class AudioPlayerScreen:
         close_btn = tk.Button(
             top_frame,
             text="❎",
-            command=self.root.destroy,
+            command=self.on_close,
             bg=bg_color,
             fg="white",
             bd=0,
@@ -847,7 +847,17 @@ class AudioPlayerScreen:
                 self.canvas.delete(player["text_id"])
             self.render_player(player)
 
-    def _on_close(self):
+    def on_close(self):
+        # Disconnect client if possible, then destroy window
+        try:
+            if (
+                self.client is not None
+                and hasattr(self.client, "sio")
+                and self.client.sio.connected
+            ):
+                self.client.sio.disconnect()
+        except Exception as e:
+            print(f"Error during disconnect: {e}")
         if hasattr(self, "voice_detector"):
             self.voice_detector.stop()
         self.root.destroy()
