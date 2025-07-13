@@ -23,6 +23,7 @@ class LoadingScreen:
         self.root.geometry(geometry_str)
         self.root.configure(bg=self.transparent_color)
         set_window_transparency(self.root, color=self.transparent_color, alpha=0.8)
+
         self.root.overrideredirect(True)
         self.root.wm_attributes("-topmost", True)
 

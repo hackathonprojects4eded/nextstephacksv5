@@ -27,6 +27,9 @@ class JoinHostCodeScreen:
 
         if sys.platform != "darwin":
             self.root.overrideredirect(True)
+        else:
+            self.root.title("FIre Jams")
+
         self.root.wm_attributes("-topmost", True)
 
         self._drag_start_pointer_x = 0
@@ -75,6 +78,7 @@ class JoinHostCodeScreen:
             self.canvas,
             text="❎",
             command=self.root.destroy,
+            activebackground=WOOD_ENGRAVING_COLOR,
             bg=WOOD_ENGRAVING_COLOR,
             fg="white",
             bd=0,
@@ -85,19 +89,10 @@ class JoinHostCodeScreen:
             220, 10, anchor="nw", window=self.close_btn, width=20, height=20
         )
 
-        # Add a small draggable square (handle) next to the close button
-        self.drag_handle = self.canvas.create_rectangle(
-            200,
-            10,
-            218,
-            28,
-            fill=WOOD_ENGRAVING_COLOR,
-            outline="#555555",
-            width=1,
-            tags="drag_handle",
-        )
-        self.canvas.tag_bind("drag_handle", "<Button-1>", self.start_move)
-        self.canvas.tag_bind("drag_handle", "<B1-Motion>", self.do_move)
+        # Revert: Bind window move to entire canvas
+        self.canvas.bind("<Button-1>", self.start_move)
+        self.canvas.bind("<B1-Motion>", self.do_move)
+        # Remove drag_handle creation and binding
 
         # Code entry box (inside polygon/rectangle) - only for join mode
         # Polygon: [61, 97, 181, 91, 182, 108, 64, 111]
