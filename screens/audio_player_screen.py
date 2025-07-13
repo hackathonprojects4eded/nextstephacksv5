@@ -8,6 +8,9 @@ from jams.shared.song_queue import SongQueue
 from .constants import WOOD_ENGRAVING_COLOR
 from utils.voice_detector import VoiceDetector, dB_to_amplitude
 from utils.tkinter_compat import set_window_transparency
+import threading
+from pydub import AudioSegment
+import pyaudio
 
 
 class AudioPlayerScreen:
@@ -98,6 +101,8 @@ class AudioPlayerScreen:
         self.build_ui()
         self.root.bind("<KeyPress-space>", lambda event: self.toggle_play())
         self.update_progress()
+        # Start fire sound loop in background thread
+        self.start_fire_sound()
 
     def _get_metadata_from_queue(self, idx):
         if 0 <= idx < len(self.queue_manager.queue):
@@ -847,6 +852,38 @@ class AudioPlayerScreen:
                 self.canvas.delete(player["text_id"])
             self.render_player(player)
 
+    def start_fire_sound(self):
+        """Start looping fire sound in a background thread."""
+        self._fire_sound_stop_event = threading.Event()
+        self._fire_sound_thread = threading.Thread(
+            target=self._play_fire_sound_loop, daemon=True
+        )
+        self._fire_sound_thread.start()
+
+    def _play_fire_sound_loop(self):
+        try:
+            fire_sound = AudioSegment.from_mp3("assets/fire-sound.mp3")
+            p = pyaudio.PyAudio()
+            stream = p.open(
+                format=p.get_format_from_width(fire_sound.sample_width),
+                channels=fire_sound.channels,
+                rate=fire_sound.frame_rate,
+                output=True,
+            )
+            raw_data = fire_sound.raw_data
+            while not self._fire_sound_stop_event.is_set():
+                stream.write(raw_data)
+            stream.stop_stream()
+            stream.close()
+            p.terminate()
+        except Exception as e:
+            print(f"Error playing fire sound: {e}")
+
+    def stop_fire_sound(self):
+        """Stop the fire sound loop."""
+        if hasattr(self, "_fire_sound_stop_event"):
+            self._fire_sound_stop_event.set()
+
     def on_close(self):
         # Disconnect client if possible, then destroy window
         try:
@@ -860,4 +897,6 @@ class AudioPlayerScreen:
             print(f"Error during disconnect: {e}")
         if hasattr(self, "voice_detector"):
             self.voice_detector.stop()
+        # Stop fire sound loop
+        self.stop_fire_sound()
         self.root.destroy()
