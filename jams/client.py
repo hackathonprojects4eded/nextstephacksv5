@@ -463,14 +463,6 @@ class Client:
             if hasattr(self.audio_player, "update_remote_talking_state"):
                 self.audio_player.update_remote_talking_state(username, is_talking)
 
-        @self.sio.event
-        def voice_data(data):
-            """Handle incoming voice data from other users."""
-            if hasattr(self, "audio_player") and hasattr(
-                self.audio_player, "play_incoming_voice"
-            ):
-                self.audio_player.play_incoming_voice(data.get("data"))
-
     def create_room(self, username, color):
         """Create a new jam room as host."""
         with self.socket_lock:
