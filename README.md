@@ -1,12 +1,23 @@
 ## Inspiration
 
+I don't have spotify premium. At 12:00 am the founder told me "if you want to go against big tech then do it" something along the lines of that in the discord. And then the idea clicked - why not make a jam thats much more indie, much more personalized, so much calm, relaxing, and detached from the grasps of big coorperations like spotify collecting all your data.
+
 ## What it does
+
+You create a room and get a code, and then you can jam to the same music as your friends, from anywhere!
+
+It's like a desktop pet - you let it sit there and enjoy the company of your friends as you listen to music with them, around a camp fire, slowly enjoying your day. 😊.
+
 
 ## How we built it
 
 Firejams is a cross-platform, real-time collaborative music listening and queueing app built with Python. Here’s how we put it together:
 
 Oh, and also, **an all nighter debugging a bug caused by base64 😔**.
+
+We implemented everything in native python (crazy, right?!). 
+
+A lot of personalizaiton and beautiful UI. Little things that go a long way. E.g. there's the talking thing you guys can use when yall in a vc or just vibing
 
 ### Architecture
 
@@ -76,8 +87,20 @@ Oh, and also, **an all nighter debugging a bug caused by base64 😔**.
 
 ## Challenges we ran into
 
+A lot
+- Threading issues
+- APi call issues
+- Jsonification issues
+- Tkinter issues
+- Platform issues
+- Streaming audio overflow
+- Memory management
+
+its only form the top of my head
+
 ## Accomplishments that we're proud of
 
-## What we learned
+Threading! Using tkinter! Only python! 
 
 ## What's next for FireJams
+Integrating AI mood detection to fully use the emotions
