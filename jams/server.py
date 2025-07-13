@@ -1022,8 +1022,8 @@ class JamServer:
         import socket
 
         try:
-            hostname = socket.gethostname()
-            local_ip = socket.gethostbyname(hostname)
+            # hostname = socket.gethostname()
+            local_ip = "192.168.86.111"
         except Exception:
             local_ip = None
 
