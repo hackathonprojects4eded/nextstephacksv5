@@ -12,6 +12,7 @@ import threading
 import pyaudio
 import numpy as np
 import queue
+import sys
 
 
 class AudioPlayerScreen:
@@ -237,16 +238,26 @@ class AudioPlayerScreen:
         ).pack(side=tk.LEFT, padx=10)
         # Add mute/unmute mic button to the right
         self.is_muted = False
+        # Platform-specific font for emoji
+        if sys.platform == "darwin":
+            mic_font = ("Apple Color Emoji", 18)
+            mic_text = "🎤"
+            print("[DEBUG] Running on Mac: using Apple Color Emoji font for mic button")
+        else:
+            mic_font = ("Helvetica", 14)
+            mic_text = "🎤"
         self.mic_btn = tk.Button(
             control_frame,
-            text="🎤",  # Unmuted icon
+            text=mic_text,  # Unmuted icon
             command=self.toggle_mic,
             bg=bg_color,
             fg="white",
-            bd=0,
-            font=("Helvetica", 14),
-            highlightthickness=0,
+            bd=1,  # Add border for debugging
+            font=mic_font,
+            highlightthickness=1,
             takefocus=0,
+            width=3,  # Fixed width for visibility
+            height=1,  # Fixed height for visibility
         )
         self.mic_btn.pack(side=tk.LEFT, padx=10)
         bottom_frame = tk.Frame(frame, bg=bg_color, highlightthickness=0, bd=0)
@@ -878,10 +889,16 @@ class AudioPlayerScreen:
     def toggle_mic(self):
         self.is_muted = not self.is_muted
         if self.is_muted:
-            self.mic_btn.config(text="🔇")  # Muted icon
+            if sys.platform == "darwin":
+                self.mic_btn.config(text="Mute")  # Fallback text if emoji fails
+            else:
+                self.mic_btn.config(text="🔇")  # Muted icon
             self.stop_voice_stream()
         else:
-            self.mic_btn.config(text="🎤")  # Unmuted icon
+            if sys.platform == "darwin":
+                self.mic_btn.config(text="Mic")  # Fallback text if emoji fails
+            else:
+                self.mic_btn.config(text="🎤")  # Unmuted icon
             self.start_voice_stream()
 
     def start_voice_stream(self):
