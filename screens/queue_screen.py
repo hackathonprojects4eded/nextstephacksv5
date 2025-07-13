@@ -4,6 +4,7 @@ import os
 from utils.song import get_song_metadata, base64_to_image
 from .constants import *
 from jams.shared.song_queue import SongQueue
+import sys
 
 
 class FireSideRadioQueueUI:
@@ -22,7 +23,11 @@ class FireSideRadioQueueUI:
         self.win = tk.Toplevel(master)
         self.win.geometry("200x300")
         self.win.configure(bg=WOOD_COLOR)
-        self.win.overrideredirect(True)  # Remove OS top bar
+        plat = sys.platform
+        if plat != "darwin":
+            self.win.overrideredirect(True)
+        else:
+            self.win.title("Queue")
         self.win.wm_attributes("-topmost", True)
         # Center the window over the master (main window)
         if master is not None:
@@ -353,6 +358,3 @@ class FireSideRadioQueueUI:
         new_x = self._drag_start_win_x + dx
         new_y = self._drag_start_win_y + dy
         self.win.geometry(f"+{new_x}+{new_y}")
-
-    def show(self):
-        self.win.deiconify()

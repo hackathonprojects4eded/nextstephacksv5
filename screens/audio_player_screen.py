@@ -303,7 +303,7 @@ class AudioPlayerScreen:
                 self, client=self.client
             ),
         )
-        self.queue_ui.show()
+        # self.queue_ui.show()  # Removed for Mac compatibility
 
     def handle_url_add(self, url):
         """Handle URL addition with download state management."""
@@ -747,6 +747,11 @@ class AudioPlayerScreen:
             mouth = "O" if self.is_talking else "C"
         else:
             mouth = "O" if player.get("is_talking", False) else "C"
+
+        import random
+
+        sample = random.sample(["H", "A"], k=1)
+
         image_name = f"H{image_type}{mouth}{color.color_index + 1}"
         # image_path = (
         #     f"assets/players/{color.color_name}/{image_name}-removebg-preview.png"
