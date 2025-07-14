@@ -1,6 +1,8 @@
 ## Inspiration
 
-I don't have spotify premium. At 12:00 am the founder told me "if you want to go against big tech then do it" something along the lines of that in the discord. And then the idea clicked - why not make a jam thats much more indie, much more personalized, so much calm, relaxing, and detached from the grasps of big coorperations like spotify collecting all your data.
+I don't have spotify premium. At 12:00 am the founder told me "if you want to go against big tech then do it" something along the lines of that in the discord (I basically mentioned that entertainment was an oversaturated market and he responded). And then the idea clicked - why not make a jam thats much more indie, much more personalized, so much calm, relaxing, and detached from the grasps of big coorperations like spotify collecting all your data.
+
+Imagine a desktop app that you can hop on when you want to chill with friends. Right now there is nothing remoately as chill as FireJams. You just sit down, relax, jam to some music together, anywhere, yes, anywhere, and even know what's up with each other (the opening and closing mouths are voice detection triggered 🤩)
 
 ## What it does
 

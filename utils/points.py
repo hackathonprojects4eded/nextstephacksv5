@@ -13,7 +13,8 @@ def log_coords(event):
 
 
 root = tk.Tk()
-img = Image.open("assets/stage.png")
+# img = Image.open("assets/notes/Notes_3.png")
+img = Image.open("alternate/preview.png")
 photo = ImageTk.PhotoImage(img)
 
 canvas = tk.Canvas(root, width=img.width, height=img.height)

@@ -3,12 +3,13 @@ import os
 
 # Set crop box: (left, upper, right, lower)
 # crop_box = (95, 235, 180, 375)  # for left sitting people
-crop_box = (363, 235, 445, 375)  # for right
+# crop_box = (363, 235, 445, 375)  # for right
 # crop_box = (188, 190, 345, 400) # for fire
 # crop_box = (298, 313, 358, 380)  # for box
+crop_box = (292, 258, 370, 331)  # notes
 
-input_folder = "assets/playersnew/right"
-output_folder = "assets/playersnew/right/crop/"
+input_folder = "assets/notes/"
+output_folder = "assets/notes/crop/"
 os.makedirs(output_folder, exist_ok=True)
 
 for filename in os.listdir(input_folder):
