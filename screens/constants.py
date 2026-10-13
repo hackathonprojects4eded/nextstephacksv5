@@ -64,3 +64,4 @@ nouns = [
 
 LOCAL_IP = "192.168.86.111"
 LOCAL_PORT = 5000
+DOWNLOADS_FOLDER = "downloads"  # song audio: fetched there by the host, cached there by friends

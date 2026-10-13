@@ -1,10 +1,8 @@
 import time
 import tkinter as tk
-from tkinter import messagebox
 from PIL import Image, ImageTk
-from utils.song import get_random_song_metadata, get_song_metadata, base64_to_image
+from utils.song import cover_photo
 from .queue_screen import FireSideRadioQueueUI
-from jams.shared.song_queue import SongQueue
 from .constants import WOOD_ENGRAVING_COLOR
 from utils.voice_detector import VoiceDetector, dB_to_amplitude
 from utils.tkinter_compat import set_window_transparency
@@ -14,7 +12,7 @@ import pyaudio
 
 
 class AudioPlayerScreen:
-    def __init__(self, root, metadata=None, client=None):
+    def __init__(self, root, client=None):
         self.root = root
         self.transparent_color = "black"
         self.root.geometry("550x400")
@@ -26,8 +24,6 @@ class AudioPlayerScreen:
         # Store client reference for queue synchronization and streaming
         self.client = client
         self.local_username = getattr(client, "username", None)
-
-        self.queue_manager = SongQueue([])
 
         # Load fire animation images
         self.fire_images = []
@@ -53,18 +49,13 @@ class AudioPlayerScreen:
             print(f"Could not load notes images: {e}")
             self.notes_images = []
 
-        # Initialize streaming state
+        # Playback state, mirrored from the server (see render_state)
+        self.state = {}
+        self.queue_ui = None
         self.is_playing = False
-        self.current_song_index = 0
         self.stream_start_time = None
         self.paused_position = 0
         self.current_duration = 0
-        self.metadata = metadata or {}
-        self.is_loading = False  # Flag to prevent seeking during load
-
-        # Seek debouncing
-        self.seek_debounce_timer = None
-        self.last_seek_position = 0
         self.is_user_seeking = False  # Flag to prevent progress updates during seeking
 
         # Player management
@@ -104,12 +95,6 @@ class AudioPlayerScreen:
         # Start fire sound loop in background thread
         self.start_fire_sound()
 
-    def _get_metadata_from_queue(self, idx):
-        if 0 <= idx < len(self.queue_manager.queue):
-            item = self.queue_manager.queue[idx]
-            return item  # Return the metadata directly from queue
-        return None
-
     def build_player_controller_ui(self, parent, x=None, y=None, width=275, height=180):
         bg_color = "#7C3F30"
         frame = tk.Frame(
@@ -124,22 +109,7 @@ class AudioPlayerScreen:
         top_frame = tk.Frame(frame, bg=bg_color, highlightthickness=0, bd=0)
         top_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
 
-        # Handle album image (could be base64 string or PIL Image)
-        if self.metadata and self.metadata.get("cover_image"):
-            cover_image = self.metadata["cover_image"]
-            if isinstance(cover_image, str):
-                # It's a base64 string, convert to PIL Image
-                img = base64_to_image(cover_image)
-                if img is None:
-                    img = Image.new("RGB", (50, 50), "gray")
-            else:
-                # It's already a PIL Image
-                img = cover_image
-        else:
-            img = Image.new("RGB", (50, 50), "gray")
-
-        img = img.resize((50, 50))
-        self.album_img = ImageTk.PhotoImage(img)
+        self.album_img = cover_photo(None, 50)  # gray until something plays
         self.album_label = tk.Label(
             top_frame, image=self.album_img, bg=bg_color, highlightthickness=0, bd=0
         )
@@ -148,34 +118,28 @@ class AudioPlayerScreen:
         self.album_label.bind("<B1-Motion>", self.do_move)
         text_frame = tk.Frame(top_frame, bg=bg_color, highlightthickness=0, bd=0)
         text_frame.pack(side=tk.LEFT, padx=10)
-        max_title_chars = 10
-        title = (
-            self.metadata.get("title", self.metadata.get("name", ""))
-            if self.metadata
-            else ""
-        )
-        if len(title) > max_title_chars:
-            title = title[: max_title_chars - 3] + "..."
-        tk.Label(
+        self.title_label = tk.Label(
             text_frame,
-            text=title,
+            text="",
             fg="white",
             bg=bg_color,
             font=("Helvetica", 10, "bold"),
             anchor="w",
             justify="left",
             wraplength=height,
-        ).pack(anchor="w")
-        tk.Label(
+        )
+        self.title_label.pack(anchor="w")
+        self.artist_label = tk.Label(
             text_frame,
-            text=self.metadata.get("artist", "") if self.metadata else "",
+            text="",
             fg="gray",
             bg=bg_color,
             font=("Helvetica", 9),
             anchor="w",
             justify="left",
             wraplength=height,
-        ).pack(anchor="w")
+        )
+        self.artist_label.pack(anchor="w")
         close_btn = tk.Button(
             top_frame,
             text="❎",
@@ -249,10 +213,17 @@ class AudioPlayerScreen:
             troughcolor="gray",
             showvalue=False,
             sliderlength=10,
-            command=self.seek,
+            command=lambda v: self.time_label_start.config(
+                text=self.format_time(float(v))
+            ),
             highlightthickness=0,
         )
         self.progress_bar.pack(side=tk.LEFT, padx=5)
+        # Seek once the slider is let go, not on every tick of a drag
+        self.progress_bar.bind(
+            "<ButtonPress-1>", lambda e: setattr(self, "is_user_seeking", True)
+        )
+        self.progress_bar.bind("<ButtonRelease-1>", self.seek)
         self.time_label_end = tk.Label(
             bottom_frame,
             text=self.format_time(self.current_duration),
@@ -295,28 +266,23 @@ class AudioPlayerScreen:
 
     def open_fire_radio_window(self, event=None):
         self.queue_ui = FireSideRadioQueueUI(
-            self.queue_manager,
+            self.state.get("queue", []),
             master=self.root,
-            on_thumbnail_click=self.play_song_from_queue,
-            on_add_url=lambda url: self.handle_url_add(url),
-            on_shuffle_queue=lambda: self.queue_manager.shuffle_queue(
-                self, client=self.client
-            ),
+            on_thumbnail_click=lambda key: self.client.send_jam("jump", key=key),
+            on_add_url=self.handle_url_add,
+            on_shuffle_queue=lambda: self.client.send_jam("shuffle"),
+            on_remove=lambda key: self.client.send_jam("remove", key=key),
         )
         self.queue_ui.show()
 
-    def handle_url_add(self, url):
-        """Handle URL addition with download state management."""
-        if self.queue_ui:
-            # Set downloading state
-            self.queue_ui.set_downloading_state()
-
-            # Add URL to queue (this will trigger the download)
-            self.queue_manager.add_url_to_queue(self, url)
+    def handle_url_add(self, text):
+        """Add a song; the button shows ⏬ until the server has it ready."""
+        self.queue_ui.set_downloading_state()
+        self.client.send_jam("add", text=text)
 
     def reset_add_button_state(self):
         """Reset the add button state in the queue UI."""
-        if hasattr(self, "queue_ui") and self.queue_ui:
+        if self.queue_ui and self.queue_ui.win.winfo_exists():
             self.queue_ui.reset_add_button_state()
 
     def build_ui(self):
@@ -389,261 +355,68 @@ class AudioPlayerScreen:
         self.root.geometry(f"+{new_x}+{new_y}")
 
     def toggle_play(self):
-        """Toggle play/pause for streaming audio."""
-        current_pos = self.get_current_pos()
-        if self.is_playing:
-            print("Playing -> Paused")
-            print(f"Current position before pause: {current_pos}")
-
-            # Pause streaming
-            if self.client and self.client.connected:
-                self.client.sio.emit(
-                    "pause_stream",
-                    {
-                        "room_code": self.client.room_code,
-                        "song_index": self.current_song_index,
-                        "position": current_pos,
-                    },
-                )
-            self.play_btn.config(text="▶")
-            self.is_playing = False
-            self.paused_position = current_pos
-            print(f"Set paused_position to: {self.paused_position}")
-        else:
-            print("Paused -> Playing")
-            print(f"Resuming from paused_position: {self.paused_position}")
-            # Resume streaming
-            if self.client and self.client.connected:
-                self.client.sio.emit(
-                    "resume_stream",
-                    {
-                        "room_code": self.client.room_code,
-                        "song_index": self.current_song_index,
-                        "position": current_pos,
-                    },
-                )
-            self.play_btn.config(text="⏸️")
-            self.is_playing = True
-            self.stream_start_time = time.time() - self.paused_position
-            print(f"Set stream_start_time to: {self.stream_start_time}")
-        self.root.update_idletasks()
+        """Play/pause the jam. Flips right away; the server's next update confirms it."""
+        self.paused_position = self.get_current_pos()
+        self.stream_start_time = time.time() - self.paused_position
+        self.is_playing = not self.is_playing
+        self.play_btn.config(text="⏸️" if self.is_playing else "▶")
+        self.client.send_jam("play" if self.is_playing else "pause")
 
     def get_current_pos(self):
-        """Get current playback position for streaming."""
+        """Get current playback position, ticking forward between server updates."""
         if self.is_playing and self.stream_start_time is not None:
-            current_pos = time.time() - self.stream_start_time
-            # print(f"Playing - current_pos: {current_pos}")
-            return current_pos
-
-        # print(f"Paused - paused_position: {self.paused_position}")
+            return time.time() - self.stream_start_time
         return self.paused_position
 
     def update_progress(self):
-        """Update progress bar for streaming audio."""
+        """Update progress bar between server updates."""
         # Don't update progress if user is actively seeking
-        if self.is_user_seeking:
-            self.root.after(200, self.update_progress)
-            return
-
-        current_pos = self.get_current_pos()
-
-        if self.is_playing and current_pos < self.current_duration:
-            # Debug: Check if progress bar exists before updating
-            if hasattr(self, "progress") and self.progress:
-                self.progress.set(current_pos)
-            if hasattr(self, "time_label_start") and self.time_label_start:
-                self.time_label_start.config(text=self.format_time(current_pos))
-        elif current_pos >= self.current_duration and self.current_duration > 0:
-            # Song finished, play next
-            self.is_playing = False
-            if hasattr(self, "play_btn"):
-                self.play_btn.config(text="▶")
-            self.auto_play_next_from_queue()
-
+        if not self.is_user_seeking:
+            current_pos = min(self.get_current_pos(), self.current_duration)
+            self.progress.set(current_pos)
+            self.time_label_start.config(text=self.format_time(current_pos))
         self.root.after(200, self.update_progress)
 
-    def update_progress_bar(self, duration):
-        """Update the progress bar with new duration."""
-        self.current_duration = duration
-        if hasattr(self, "progress_bar"):
-            self.progress_bar.config(to=max(duration, 1))
-        if hasattr(self, "time_label_end"):
-            self.time_label_end.config(text=self.format_time(duration))
+    def render_state(self, state, received_at):
+        """Show the jam's playback (see Jam.state in jams/jam.py) as of now."""
+        track = state.get("track") or {}
+        if track.get("cover_url") != (self.state.get("track") or {}).get("cover_url"):
+            self.album_img = cover_photo(track.get("cover_url"), 50)
+            self.album_label.config(image=self.album_img)
+        self.state = state
 
-    def stop_current_stream(self):
-        """Stop the current audio stream."""
-        if self.client and self.client.is_streaming:
-            print("Stopping current audio stream")
-            self.client.stop_audio_stream()
-            self.is_playing = False
-            if hasattr(self, "play_btn"):
-                self.play_btn.config(text="▶")
+        max_title_chars = 10
+        title = track.get("title", "")
+        if len(title) > max_title_chars:
+            title = title[: max_title_chars - 3] + "..."
+        self.title_label.config(text=title)
+        self.artist_label.config(text=track.get("artist", ""))
 
-    def _load_and_play_song(self, idx):
-        print(f"_load_and_play_song called with index {idx}")
-        if 0 <= idx < len(self.queue_manager.queue):
-            item = self.queue_manager.queue[idx]
-            if item:
-                print(f"Loading song: {item.get('title', item.get('name', 'Unknown'))}")
+        self.is_playing = state.get("is_playing", False)
+        elapsed = time.time() - received_at if self.is_playing else 0  # e.g. song loading
+        self.paused_position = state.get("progress_ms", 0) / 1000 + elapsed
+        self.stream_start_time = time.time() - self.paused_position
+        self.current_duration = track.get("duration_ms", 0) / 1000
+        self.progress_bar.config(to=max(self.current_duration, 1))
+        self.time_label_end.config(text=self.format_time(self.current_duration))
+        self.play_btn.config(text="⏸️" if self.is_playing else "▶")
 
-                self.is_loading = True
-
-                # Only stop current stream if we're switching to a different song
-                if self.current_song_index != idx:
-                    self.stop_current_stream()
-
-                self.metadata = item
-                self.queue_manager.current_idx = idx
-                self.current_song_index = idx
-
-                self.player_controller = self.build_player_controller_ui(
-                    self.canvas, x=160, y=29, width=230, height=140
-                )
-                self.canvas.create_window(
-                    160,
-                    29,
-                    anchor="nw",
-                    window=self.player_controller,
-                    width=220,
-                    height=140,
-                )
-
-                # Update progress bar with new duration after UI rebuild
-                duration = item.get("length", 0)
-                print(f"Updating progress bar with duration: {duration}s")
-                self.update_progress_bar(duration)
-
-                self.progress.set(0)
-                self.time_label_start.config(text="00:00")
-                self.play_btn.config(text="⏸️")
-                self.is_playing = True
-                self.paused_position = 0
-                self.stream_start_time = time.time()
-
-                self.root.after(1000, lambda: setattr(self, "is_loading", False))
-
-                self.root.update_idletasks()
-
-    def play_song_from_queue(self, idx):
-        self._load_and_play_song(idx)
-        if hasattr(self, "queue_ui") and self.queue_ui:
-            self.queue_ui.display_queue()
-        print(f"Playing song from queue at index {idx}")
-        if self.client:
-            self.client.sync_current_index_with_server(idx)
-            self.client.sio.emit(
-                "play_song",
-                {"room_code": self.client.room_code, "song_index": idx},
-            )
-
-    def auto_play_next_from_queue(self):
-        next_idx = self.queue_manager.current_idx + 1
-        if next_idx < len(self.queue_manager.queue):
-            self._load_and_play_song(next_idx)
-
-            if hasattr(self, "queue_ui") and self.queue_ui:
-                self.queue_ui.display_queue()
-
-            if self.client:
-                self.client.sync_current_index_with_server(next_idx)
-                self.client.sio.emit(
-                    "play_song",
-                    {"room_code": self.client.room_code, "song_index": next_idx},
-                )
+        if self.queue_ui and self.queue_ui.win.winfo_exists():
+            self.queue_ui.display_queue(state.get("queue", []))
 
     def prev_song(self):
-        prev_idx = self.queue_manager.current_idx - 1
-        if prev_idx >= 0:
-            self._load_and_play_song(prev_idx)
-            if hasattr(self, "queue_ui") and self.queue_ui:
-                self.queue_ui.display_queue()
-
-            if self.client:
-                self.client.sync_current_index_with_server(prev_idx)
-                self.client.sio.emit(
-                    "play_song",
-                    {"room_code": self.client.room_code, "song_index": prev_idx},
-                )
+        self.client.send_jam("previous")
 
     def next_song(self):
-        self.auto_play_next_from_queue()
+        self.client.send_jam("next")
 
-    def seek(self, val):
-        """Debounced seek to position in streaming audio."""
-        val = float(val)
-
-        # Don't seek if we're not connected, don't have a current song, or are loading
-        if (
-            not self.client
-            or not self.client.connected
-            or self.current_song_index < 0
-            or self.is_loading
-        ):
-            return
-
-        # Set seeking flag to prevent progress updates
-        self.is_user_seeking = True
-
-        # Cancel any existing timer
-        if self.seek_debounce_timer:
-            self.root.after_cancel(self.seek_debounce_timer)
-
-        # Store the current position
-        self.last_seek_position = val
-
-        # Set a timer to perform the actual seek after 500ms of no movement
-        self.seek_debounce_timer = self.root.after(500, self.perform_seek)
-
-        # Update UI immediately for responsive feel (without sending to server)
-        self.update_seek_ui(val)
-
-    def perform_seek(self, toggled=False):
-        """Perform the actual seek operation after debounce delay."""
-        if not self.client or not self.client.connected or self.current_song_index < 0:
-            return
-
-        position = self.last_seek_position
-        print(f"Performing debounced seek to {position}s")
-
-        # If we're playing, pause first, then seek, then resume
-        was_playing = self.is_playing
-        if was_playing:
-            self.toggle_play()
-
-        # Send seek event to server
-        self.client.sio.emit(
-            "seek_stream",
-            {
-                "room_code": self.client.room_code,
-                "song_index": self.current_song_index,
-                "position": position,
-            },
-        )
-
-        # Update local state immediately for responsive UI
-        if self.is_playing:
-            self.stream_start_time = time.time() - position
-        else:
-            self.paused_position = position
-
-        # Update progress bar and time label
-        self.progress.set(position)
-        if hasattr(self, "time_label_start"):
-            self.time_label_start.config(text=self.format_time(position))
-
-        # Clear the seeking flag to allow progress updates to resume
+    def seek(self, event=None):
+        """Jump the jam to wherever the slider was let go."""
         self.is_user_seeking = False
-
-        # If we were playing, resume after a short delay
-        if was_playing:
-            print("Resuming after seek")
-            self.root.after(100, self.toggle_play)
-
-    def update_seek_ui(self, position):
-        """Update UI elements during seeking without sending to server."""
-        # Update time label immediately for responsive feel
-        if hasattr(self, "time_label_start"):
-            self.time_label_start.config(text=self.format_time(position))
+        position = self.progress.get()
+        self.paused_position = position
+        self.stream_start_time = time.time() - position
+        self.client.send_jam("seek", position_ms=int(position * 1000))
 
     def format_time(self, seconds):
         mins = int(seconds) // 60

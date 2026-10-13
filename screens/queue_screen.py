@@ -1,24 +1,24 @@
 import tkinter as tk
-from PIL import Image, ImageTk
-import os
-from utils.song import get_song_metadata, base64_to_image
+from utils.song import cover_photo
 from .constants import *
-from jams.shared.song_queue import SongQueue
 
 
 class FireSideRadioQueueUI:
+    """What's up next in the jam. Callbacks get a queued song's `key`, or the add box text."""
+
     def __init__(
         self,
-        queue_manager,
+        queue,
         master=None,
         on_thumbnail_click=None,
         on_add_url=None,
         on_shuffle_queue=None,
+        on_remove=None,
     ):
-        self.queue_manager = queue_manager
         self.on_thumbnail_click = on_thumbnail_click
         self.on_add_url = on_add_url
         self.on_shuffle_queue = on_shuffle_queue
+        self.on_remove = on_remove
         self.win = tk.Toplevel(master)
         self.win.geometry("200x300")
         self.win.configure(bg=WOOD_COLOR)
@@ -84,7 +84,8 @@ class FireSideRadioQueueUI:
         self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.thumbnail_images = []  # Keep references to avoid garbage collection
-        self.display_queue()
+        self.shown_keys = None
+        self.display_queue(queue)
         # Bind mouse wheel to scroll
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
@@ -168,22 +169,21 @@ class FireSideRadioQueueUI:
         if hasattr(self, "on_shuffle_queue") and self.on_shuffle_queue:
             self.on_shuffle_queue()
 
-    def display_queue(self):
+    def display_queue(self, queue):
+        keys = [item["key"] for item in queue]
+        if keys == self.shown_keys:
+            return  # unchanged: skip the redraw and keep the scroll position
+        self.shown_keys = keys
+
         # Clear previous widgets
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
+        self.thumbnail_images = []
 
-        start_idx = (
-            self.queue_manager.current_idx + 1
-            if hasattr(self.queue_manager, "current_idx")
-            else 0
-        )
+        for item in queue:
+            self.create_list_tile(item["key"], item)
 
-        for pp in range(start_idx, len(self.queue_manager.queue)):
-            item = self.queue_manager.queue[pp]
-            self.create_list_tile(pp, item)
-
-    def create_list_tile(self, idx, item):
+    def create_list_tile(self, key, item):
         max_title_chars = 13
         max_author_chars = 13
         row = tk.Frame(self.scrollable_frame, bg=WOOD_COLOR, cursor="hand2")
@@ -230,46 +230,11 @@ class FireSideRadioQueueUI:
         play_icon.bind("<Leave>", hide_overlay)
 
         # Thumbnail image logic
-        title = ""
-        author = ""
-
-        # Use metadata from the queue item (from server)
-        if item.get("cover_image"):
-            # Cover image is base64 string from server, convert back to PIL Image
-            try:
-                img = base64_to_image(item["cover_image"])
-                if img:
-                    img = img.resize((40, 40))
-                    thumb_img = ImageTk.PhotoImage(img)
-                    thumb_label.config(image=thumb_img)
-                    self.thumbnail_images.append(thumb_img)
-                title = item.get("title", item.get("name", ""))
-                author = item.get("artist", "")
-            except Exception as e:
-                print(f"Error converting base64 image: {e}")
-                title = item.get("title", item.get("name", ""))
-                author = item.get("artist", "")
-        elif "filepath" in item and os.path.exists(item["filepath"]):
-            # Fallback: extract from local file
-            try:
-                meta = get_song_metadata(item["filepath"])
-                if meta.get("cover_image"):
-                    # Convert base64 back to image
-                    img = base64_to_image(meta["cover_image"])
-                    if img:
-                        img = img.resize((40, 40))
-                        thumb_img = ImageTk.PhotoImage(img)
-                        thumb_label.config(image=thumb_img)
-                        self.thumbnail_images.append(thumb_img)
-                title = meta.get("title", "")
-                author = meta.get("artist", "")
-            except Exception:
-                title = os.path.basename(item["filepath"])
-                author = "Unknown Artist"
-        elif "url" in item:
-            thumb_label.config(text="🌐", font=("Helvetica", 7))
-            title = "Online Stream"
-            author = "DJ Web"
+        thumb_img = cover_photo(item.get("cover_url"), 40)
+        thumb_label.config(image=thumb_img)
+        self.thumbnail_images.append(thumb_img)
+        title = item.get("title", "")
+        author = item.get("artist", "")
         # Info (title, author)
         info_frame = tk.Frame(row, bg=WOOD_COLOR)
         info_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
@@ -298,8 +263,8 @@ class FireSideRadioQueueUI:
         )
         author_label.pack(anchor="w", pady=0, fill="x")
         # Thumbnail click: play and remove
-        play_icon.bind("<Button-1>", lambda e, i=idx: self.handle_thumbnail_click(i))
-        overlay.bind("<Button-1>", lambda e, i=idx: self.handle_thumbnail_click(i))
+        play_icon.bind("<Button-1>", lambda e, k=key: self.handle_thumbnail_click(k))
+        overlay.bind("<Button-1>", lambda e, k=key: self.handle_thumbnail_click(k))
         # Three-dot menu button (anchor right)
         menu_btn = tk.Button(
             row,
@@ -316,30 +281,23 @@ class FireSideRadioQueueUI:
         )
         menu_btn.pack(side=tk.RIGHT, padx=(30, 0), anchor="e")
         menu_btn.bind(
-            "<Button-1>", lambda e, i=idx, b=menu_btn: self.show_context_menu(e, i, b)
+            "<Button-1>", lambda e, k=key, b=menu_btn: self.show_context_menu(e, k, b)
         )
 
-    def show_context_menu(self, event, idx, btn):
+    def show_context_menu(self, event, key, btn):
         menu = tk.Menu(self.win, tearoff=0)
         menu.add_command(
-            label="Remove from queue", command=lambda: self.remove_from_queue(idx)
+            label="Remove from queue", command=lambda: self.remove_from_queue(key)
         )
         menu.tk_popup(event.x_root, event.y_root)
 
-    def remove_from_queue(self, idx):
-        self.queue_manager.remove_from_queue(idx)
-        # Sync with server if possible
-        app = getattr(self, "app", None)
-        client = getattr(app, "client", None) if app else None
-        if client and hasattr(client, "sync_queue_with_server"):
-            client.sync_queue_with_server(self.queue_manager.queue)
-        self.display_queue()
+    def remove_from_queue(self, key):
+        if self.on_remove:
+            self.on_remove(key)
 
-    def handle_thumbnail_click(self, idx):
+    def handle_thumbnail_click(self, key):
         if self.on_thumbnail_click:
-            self.on_thumbnail_click(idx)
-
-        print(f"List thumbnail clicked: {idx}")
+            self.on_thumbnail_click(key)
 
     def start_move(self, event):
         self._drag_start_pointer_x = self.win.winfo_pointerx()
