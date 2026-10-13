@@ -5,7 +5,7 @@ A cozy "desktop pet" campfire overlay (Tkinter, Windows-first). Friends sit arou
 ## Commands (Windows + Git Bash, from the repo root)
 - Run: `uv run main.py`, or `run.bat` / `run.sh` (they `cd` to the repo first). Asset and `downloads/` paths are relative to the root.
 - Self-checks (offline, about 1 s each, each prints `ok`):
-  `uv run python -m jams.test_jam && uv run python -m jams.test_music && uv run python -m jams.test_player`
+  `uv run python -m jams.test_jam && uv run python -m jams.test_music && uv run python -m jams.test_player && uv run python -m jams.test_room_code`
   Always use `-m` from the root: `python jams/test_jam.py` fails with `No module named 'jams'`.
 - Don't launch `main.py` from a session unless asked: at startup it opens borderless topmost windows, the mic and the speakers. Check work with the self-checks.
 - Headless room server, same as the host's server thread: `uv run python -m jams.server` (binds port 5000 and blocks).
@@ -13,7 +13,8 @@ A cozy "desktop pet" campfire overlay (Tkinter, Windows-first). Friends sit arou
 - YouTube changes break yt-dlp: `uv lock --upgrade-package yt-dlp`, then `uv sync`. Its JS runtime `deno` comes from the `yt-dlp[default,deno]` extra and lives in `.venv`.
 
 ## How it works
-- **Server**: the host's app runs the Socket.IO server (`jams/server.py`, python-socketio on eventlet) on a thread started by `screens/loading.py`. Every app, the host's included, connects to `LOCAL_IP:LOCAL_PORT` from `screens/constants.py`.
+- **Server**: the host's app runs the Socket.IO server (`jams/server.py`, python-socketio on eventlet) on a thread started by `screens/loading.py`, and connects to it at `127.0.0.1:LOCAL_PORT`.
+- **Join codes** (`jams/room_code.py`): a room's code *is* the host's LAN IPv4 in base 36 (7 chars, e.g. `192.168.68.56` → `1HGEED4`). A friend types it on the join sign and their app connects to `<decoded ip>:LOCAL_PORT`. One room per server; no IP is configured anywhere.
 - **Rooms**: the server owns one `Jam` (`jams/jam.py`) per room. Any member sends `jam_cmd`; the server changes the `Jam` and broadcasts `jam_state` (`Jam.state()` plus an increasing `seq`).
 - **Jam**: `queue` keeps played songs too (so `previous` works); `state()` sends only the upcoming ones. Each entry gets a `key`, so two copies of a song differ; the UI names songs by `key`, never by index.
 - **Ticker**: the `tick_rooms` greenthread checks every 0.5 s and moves a room on when its song ends.
@@ -51,16 +52,15 @@ Room members are other people's computers sending arbitrary payloads.
 - A new playback feature is a `Jam` method (it takes `now`; it never calls `time.time()`) with asserts in `jams/test_jam.py`, a branch in `jam_cmd`, and `client.send_jam(...)` from the UI. The UI shows what `jam_state` says (`render_state`).
 - Cover art: call `fetch_cover(url)` off the Tk thread (it fills a cache), then `cover_photo(url, size)` on it.
 - UI positions are absolute pixel coordinates on the art. `utils/points.py` prints the coordinates you click on an image.
+- Avatar images are named `{emotion}{side}{mouth}{color}`: emotion `H` happy / `A` angry, side `L`/`R` of the fire, mouth `O` open (talking) / `C` closed, color `1`-`7` = `COLOR_NAMES` index + 1. `render_player` uses the owner's cleaned-up `assets/players/<ColorName>/{name}-removebg-preview.png`, which are all happy (`H`). The angry variants exist only in the untracked `assets/allplayers/`, kept for a planned feature that picks the emotion by classifying the audio.
 - Self-checks are plain `assert` scripts with a `__main__` runner, runnable with `python -m` and offline (`Player(..., speakers=False)`, a `file://` URL as the host). There's no pytest; keep that style.
 - Code style: match the surrounding code; small plain functions; short docstrings; `# ponytail:` comments mark deliberate shortcuts and their ceiling.
 
 ## Traps
-- `LOCAL_IP = "192.168.86.111"` is a hardcoded LAN IP: it only works on one network, and the host's PC must have that address. To try two apps on one PC, set it to `127.0.0.1` locally (don't commit that).
-- `screens/loading.py` and `screens/joinhostcode.py` start the server with a literal `port=5000`. Change them together with `LOCAL_PORT`.
-- If a joiner can't reach `LOCAL_IP`, `JoinHostCodeScreen.join_room` starts its own empty `JamServer`, blocks the Tk thread, and retries the same address. It never yields a joinable room.
+- Join codes carry a LAN address, so friends must be on the host's network. Remote friends would need e.g. Tailscale or port forwarding, plus a code built from that address instead of `lan_ip()`. Windows Firewall must allow the venv's Python on Private networks, or joiners get "Can't reach that jam".
+- `JoinHostCodeScreen.join_room` connects on the Tk thread, so the sign freezes until the connect succeeds or times out (about 5 s).
 - The close button on the loading and code screens disconnects the shared socket, so closing the host's code sign leaves the room.
 - `JoinHostCodeScreen` calls `sio.on("room_created", ...)`, which replaces `Client`'s handler that sets `client.room_code`. It works only because the reply beats `LoadingScreen`'s 0.5 s wait. If the reply loses, the host's `send_jam` silently does nothing.
-- Avatars: `render_player` loads `assets/allplayers/H{L|R}{O|C}{1-7}.png`, but `.gitignore` has `allplayers/`. Those files exist only on this PC, so fresh clones show no avatars (the error is caught and printed). The tracked `assets/players/<Color>/*-removebg-preview.png` (the commented-out path) are the same size but different art. Committing `assets/allplayers/` is the owner's call.
 - Pure black is the transparency key of the stage and sign windows (`utils/tkinter_compat.py`; `-transparentcolor` on Windows), so anything drawn `black`/`#000` turns see-through. macOS uses `-transparent`; Linux only gets an 80% alpha window.
 - The fire crackle uses pydub + PyAudio, and `AudioSegment.from_mp3` needs a system ffmpeg on PATH. Without it, the error is caught and the fire is silent.
 - Importing `jams.server` prints an `EventletDeprecationWarning`. That's expected.

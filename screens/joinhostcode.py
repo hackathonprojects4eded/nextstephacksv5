@@ -3,9 +3,9 @@ from .constants import (
     WOOD_COLOR,
     WOOD_ENGRAVING_COLOR,
     WOOD_ENTER_USERNAME_COLOR,
-    LOCAL_IP,
     LOCAL_PORT,
 )
+from jams.room_code import host_for
 from utils.tkinter_compat import set_window_transparency
 
 
@@ -270,58 +270,24 @@ class JoinHostCodeScreen:
         notification.after(2500, notification.destroy)
 
     def join_room(self, room_code):
-        """Join a room with the given code."""
-        # Show loading state
-        self.update_join_status("Connecting to server...")
+        """Join a friend's jam: the code holds the host's address (jams/room_code.py)."""
+        try:
+            host = host_for(room_code)
+        except ValueError as e:
+            self.update_join_status(str(e))
+            return
 
-        # First, connect to the server if not already connected
-        if not self.client.is_connected():
-            print(f"Client not connected, attempting to connect...")
+        self.update_join_status("Connecting...")
+        if not self.client.is_connected() and not self.client.connect_to_server(
+            f"http://{host}:{LOCAL_PORT}"
+        ):
+            self.update_join_status("Can't reach that jam. Same Wi-Fi?")
+            return
 
-            # Try to connect to existing server first
-            if not self.client.connect_to_server(f"http://{LOCAL_IP}:{LOCAL_PORT}"):
-                print("No existing server found, starting new server...")
-                self.update_join_status("Starting server...")
-
-                # Start server in background
-                import threading
-                import time
-                from jams.server import JamServer
-
-                def start_server():
-                    try:
-                        server = JamServer()
-                        server.run(host="0.0.0.0", port=5000)
-                    except Exception as e:
-                        print(f"Server error: {e}")
-
-                server_thread = threading.Thread(target=start_server, daemon=True)
-                server_thread.start()
-
-                # Wait for server to start
-                time.sleep(2)
-
-                # Try connecting again
-                if not self.client.connect_to_server(f"http://{LOCAL_IP}:{LOCAL_PORT}"):
-                    self.update_join_status("Failed to connect to server")
-                    print("Failed to connect to server")
-                    return
-                else:
-                    print("Successfully connected to server")
-            else:
-                print("Successfully connected to existing server")
-
-        self.update_join_status("Joining room...")
         print(f"Attempting to join room: {room_code}")
-
-        # Try to join the room
-        if self.client.join_room(room_code, self.username, self.color):
-            self.update_join_status("Joining room...")
-            print("Join room request sent successfully")
-
-        else:
+        if not self.client.join_room(room_code.strip().upper(), self.username, self.color):
             self.update_join_status("Failed to join room")
-            print("Failed to send join room request")
+            return
 
         self.root.destroy()
 
@@ -334,6 +300,7 @@ class JoinHostCodeScreen:
             self.status_text = self.canvas.create_text(
                 123, 135, text=status, fill="gray", font=("Helvetica", 10)
             )
+        self.root.update_idletasks()  # show it before a blocking connect
 
     def on_room_created(self, data):
         """Called when room is created by the server."""

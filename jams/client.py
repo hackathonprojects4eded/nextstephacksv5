@@ -6,7 +6,6 @@ import socketio
 
 from jams.player import Player
 from screens.audio_player_screen import AudioPlayerScreen
-from screens.constants import LOCAL_IP, LOCAL_PORT
 from utils.song import fetch_cover
 
 
@@ -31,7 +30,7 @@ class Client:
         self.socket_lock = threading.Lock()
 
         # Plays the jam on this computer; jam_seq skips updates that arrive late
-        self.player = Player(f"http://{LOCAL_IP}:{LOCAL_PORT}")
+        self.player = Player(None)  # its server_url is set once we connect
         self.jam_lock = threading.Lock()
         self.jam_seq = 0
 
@@ -160,12 +159,11 @@ class Client:
             )
             return True
 
-    def connect_to_server(self, server_url=None):
+    def connect_to_server(self, server_url):
         """Connect to the socket server."""
-        if server_url is None:
-            server_url = f"http://{LOCAL_IP}:{LOCAL_PORT}"
         try:
             self.sio.connect(server_url, wait_timeout=10)
+            self.player.server_url = server_url  # songs download from the same host
             return True
         except Exception as e:
             print(f"Failed to connect to server: {e}")

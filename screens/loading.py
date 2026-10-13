@@ -1,5 +1,5 @@
 import tkinter as tk
-from .constants import WOOD_COLOR, WOOD_ENGRAVING_COLOR, LOCAL_IP, LOCAL_PORT
+from .constants import WOOD_COLOR, WOOD_ENGRAVING_COLOR, LOCAL_PORT
 from .joinhostcode import JoinHostCodeScreen
 from utils.tkinter_compat import set_window_transparency
 
@@ -190,7 +190,7 @@ class LoadingScreen:
                 def start_server():
                     try:
                         server = JamServer()
-                        server.run(host="0.0.0.0", port=5000)
+                        server.run(host="0.0.0.0", port=LOCAL_PORT)
                     except Exception as e:
                         print(f"Server error: {e}")
 
@@ -211,7 +211,7 @@ class LoadingScreen:
                 for attempt in range(max_retries):
                     try:
                         if self.client.connect_to_server(
-                            f"http://{LOCAL_IP}:{LOCAL_PORT}"
+                            f"http://127.0.0.1:{LOCAL_PORT}"  # our own server
                         ):
                             self.root.after(
                                 0, lambda: self.update_progress("Connected to server")

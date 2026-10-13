@@ -3,9 +3,7 @@ import eventlet
 from eventlet import wsgi
 import itertools
 import os
-import random
 import re
-import string
 import threading
 import time
 from concurrent.futures import Future
@@ -15,7 +13,8 @@ import sys
 sys.path.append(".")
 from jams import music
 from jams.jam import Jam
-from screens.constants import DOWNLOADS_FOLDER, LOCAL_IP, LOCAL_PORT
+from jams.room_code import code_for, lan_ip
+from screens.constants import DOWNLOADS_FOLDER, LOCAL_PORT
 
 AUDIO_RE = re.compile(r"/audio/([A-Za-z0-9_-]{11}\.[a-z0-9]{2,5})")  # never a path
 
@@ -229,11 +228,8 @@ class JamServer:
                     self.broadcast_jam(room_code)
 
     def generate_room_code(self) -> str:
-        """Generate a unique 6-character room code."""
-        while True:
-            code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
-            if code not in self.rooms:
-                return code
+        """The host's join code: this computer's address, so friends' apps can find it."""
+        return code_for(lan_ip())  # one room per host: each host runs its own server
 
     def remove_user_from_room(self, sid: str):
         """Remove a user from their room when they disconnect."""
@@ -285,17 +281,10 @@ class JamServer:
         """Start the server."""
         if port is None:
             port = LOCAL_PORT
-        local_ip = LOCAL_IP
+        ip = lan_ip()
 
         print(f"Starting Jam Server on {host}:{port}")
-        if host == "0.0.0.0":
-            print("[INFO] To connect from another device on your network, use:")
-            if local_ip and not local_ip.startswith("127."):
-                print(f"  http://{local_ip}:{port}")
-            else:
-                print("  [Replace with your LAN IPv4 address]")
-        else:
-            print(f"[INFO] Server accessible at http://{host}:{port}")
+        print(f"[INFO] Friends on this network join with code {code_for(ip)} ({ip}:{port})")
 
         # Start Socket.IO server
         eventlet.spawn(self.tick_rooms)

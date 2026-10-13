@@ -525,11 +525,11 @@ class AudioPlayerScreen:
 
         sample = random.sample(["H", "A"], k=1)
 
+        # {emotion H/A}{side L/R}{mouth O/C}{color 1-7}; players/ only has happy (H) art
         image_name = f"H{image_type}{mouth}{color.color_index + 1}"
-        # image_path = (
-        #     f"assets/players/{color.color_name}/{image_name}-removebg-preview.png"
-        # )
-        image_path = f"assets/allplayers/{image_name}.png"
+        image_path = (
+            f"assets/players/{color.color_name}/{image_name}-removebg-preview.png"
+        )
 
         try:
             # Load and cache image
