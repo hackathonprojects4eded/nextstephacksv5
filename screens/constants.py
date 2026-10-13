@@ -1,3 +1,5 @@
+import os
+
 WOOD_COLOR = "#7C3F30"
 WOOD_ENGRAVING_COLOR = "#502319"
 COLOR_HEXS = [
@@ -64,4 +66,8 @@ nouns = [
 
 LOCAL_IP = "192.168.86.111"
 LOCAL_PORT = 5000
-DOWNLOADS_FOLDER = "downloads"  # song audio: fetched there by the host, cached there by friends
+# Song audio: fetched there by the host, cached there by friends, wiped by main.py. Next to
+# main.py, never cwd-relative: run from your home folder, "downloads" would be your Downloads
+DOWNLOADS_FOLDER = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "downloads"
+)

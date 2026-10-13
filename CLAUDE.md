@@ -3,7 +3,7 @@
 A cozy "desktop pet" campfire overlay (Tkinter, Windows-first). Friends sit around a fire as avatars whose mouths move when they talk (mic voice detection) and listen to the same music together. Hard rule: joining is FREE, with no Spotify Premium or any other account.
 
 ## Commands (Windows + Git Bash, from the repo root)
-- Run: `uv run main.py`, or `run.bat` / `run.sh` (they `cd` to the repo first). Asset and `downloads/` paths are relative to the root.
+- Run: `uv run main.py`, or `run.bat` / `run.sh` (they `cd` to the repo first). Asset paths are relative to the root; `DOWNLOADS_FOLDER` is absolute (next to `main.py`) because it gets wiped.
 - Self-checks (offline, about 1 s each, each prints `ok`):
   `uv run python -m jams.test_jam && uv run python -m jams.test_music && uv run python -m jams.test_player && uv run python -m jams.test_room_code`
   Always use `-m` from the root: `python jams/test_jam.py` fails with `No module named 'jams'`.
@@ -59,7 +59,7 @@ Room members are other people's computers sending arbitrary payloads.
 ## Traps
 - Join codes carry a LAN address, so friends must be on the host's network. Remote friends would need e.g. Tailscale or port forwarding, plus a code built from that address instead of `lan_ip()`. Windows Firewall must allow the venv's Python on Private networks, or joiners get "Can't reach that jam".
 - `JoinHostCodeScreen.join_room` connects on the Tk thread, so the sign freezes until the connect succeeds or times out (about 5 s).
-- The close button on the loading and code screens disconnects the shared socket, so closing the host's code sign leaves the room.
+- Closing the code sign only puts it away (you stay in the jam); the campfire's ❎ is what leaves the jam and quits. The loading screen's ❎ still disconnects, which aborts hosting.
 - `JoinHostCodeScreen` calls `sio.on("room_created", ...)`, which replaces `Client`'s handler that sets `client.room_code`. It works only because the reply beats `LoadingScreen`'s 0.5 s wait. If the reply loses, the host's `send_jam` silently does nothing.
 - Pure black is the transparency key of the stage and sign windows (`utils/tkinter_compat.py`; `-transparentcolor` on Windows), so anything drawn `black`/`#000` turns see-through. macOS uses `-transparent`; Linux only gets an 80% alpha window.
 - The fire crackle uses pydub + PyAudio, and `AudioSegment.from_mp3` needs a system ffmpeg on PATH. Without it, the error is caught and the fire is silent.
@@ -69,7 +69,9 @@ Room members are other people's computers sending arbitrary payloads.
 - Not part of the app:
   - `utils/test_voice_detector.py` is a manual mic-threshold tool that runs until Ctrl+C (`uv run python utils/test_voice_detector.py`).
   - `utils/crop.py` and `utils/points.py` do their work at import (`crop.py` rewrites `assets/notes/crop/`). Never import them.
-  - `songs/` holds unused spotdl-era mp3s. `downloads/` is gitignored and never pruned.
+  - `songs/` holds unused spotdl-era mp3s; nothing reads or cleans it.
+- `downloads/` (gitignored) lasts one session: `main.py` wipes it at startup and in a `finally` (❎, Ctrl+C, a crash). A closed terminal or a Task Manager kill skips the `finally`, so the next startup wipes it. Files still being written at exit are locked on Windows and wait for the next startup too.
+- One app per checkout: a second app, or `python -m jams.server`, on the same computer shares `downloads/`, and those wipes delete its songs.
 
 ## Why not Spotify (don't retry these routes)
 - Spotify Jams have no public API.

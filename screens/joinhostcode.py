@@ -327,6 +327,8 @@ class JoinHostCodeScreen:
 
     def check_for_room_code(self):
         """Check if room code is available and update display."""
+        if not self.root.winfo_exists():
+            return  # the sign was put away
         if self.is_host and self.client.room_code:
             self.code_var.set(self.client.room_code)
             # print(f"Room code set to: {self.client.room_code}")
@@ -335,10 +337,5 @@ class JoinHostCodeScreen:
         self.root.after(100, self.check_for_room_code)
 
     def on_close(self):
-        # Disconnect client if possible, then destroy window
-        try:
-            if hasattr(self.client, "sio") and self.client.sio.connected:
-                self.client.sio.disconnect()
-        except Exception as e:
-            print(f"Error during disconnect: {e}")
+        # Just put the sign away: you stay in the jam (the campfire's ❎ leaves it)
         self.root.destroy()

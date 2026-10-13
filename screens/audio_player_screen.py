@@ -607,7 +607,7 @@ class AudioPlayerScreen:
         # Emit talking state to server for relay
         if (
             self.client
-            and hasattr(self.client, "sio")
+            and self.client.connected  # emitting while disconnected raises and kills the mic thread
             and self.client.room_code
             and self.local_username
         ):
