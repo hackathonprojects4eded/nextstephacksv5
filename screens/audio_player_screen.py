@@ -11,6 +11,14 @@ from pydub import AudioSegment
 import pyaudio
 
 
+def toplevels(widget):
+    """Every Toplevel under widget: the signs, the queue window, their popups."""
+    for child in widget.winfo_children():
+        if isinstance(child, tk.Toplevel):
+            yield child
+        yield from toplevels(child)
+
+
 class AudioPlayerScreen:
     def __init__(self, root, client=None):
         self.root = root
@@ -20,6 +28,9 @@ class AudioPlayerScreen:
         set_window_transparency(self.root, color=self.transparent_color, alpha=0.8)
         self.root.wm_attributes("-topmost", True)
         self.root.configure(bg=self.transparent_color)
+        self.root.title("Firejams")  # the taskbar button's name while hidden (see hide)
+        self.hidden_windows = None  # the Toplevels hide() put away, until we're back
+        self.root.bind("<Map>", self.on_map)
 
         # Store client reference for queue synchronization and streaming
         self.client = client
@@ -37,6 +48,8 @@ class AudioPlayerScreen:
         except Exception as e:
             print(f"Could not load fire images: {e}")
             self.fire_images = []
+        if self.fire_images:
+            self.root.iconphoto(False, self.fire_images[0])  # for the taskbar button
 
         # Load notes animation images
         self.notes_images = []
@@ -79,6 +92,7 @@ class AudioPlayerScreen:
         self.player_images = {}  # Cache for player images
 
         self.is_talking = False  # Track if local user is talking
+        self.muted = False  # muted: the mic is let go and our mouth stays closed
         # Voice detection threshold in dB (adjust as needed)
         self.voice_threshold_db = -30  # Typical values: -40 (quiet) to -20 (loud)
         self.voice_threshold = dB_to_amplitude(self.voice_threshold_db)
@@ -140,8 +154,11 @@ class AudioPlayerScreen:
             wraplength=height,
         )
         self.artist_label.pack(anchor="w")
+        # ➖ ❎ over 🎤, packed before the names so a long name gets cut off, not them
+        buttons = tk.Frame(top_frame, bg=bg_color, highlightthickness=0, bd=0)
+        buttons.pack(side=tk.RIGHT, before=text_frame)
         close_btn = tk.Button(
-            top_frame,
+            buttons,
             text="❎",
             command=self.on_close,
             bg=bg_color,
@@ -153,7 +170,22 @@ class AudioPlayerScreen:
             highlightthickness=0,
             takefocus=0,
         )
-        close_btn.pack(side=tk.RIGHT)
+        close_btn.grid(row=0, column=1)
+        hide_btn = tk.Button(buttons, text="➖", command=self.hide)
+        self.mute_btn = tk.Button(buttons, text="🎤", command=self.toggle_mute)
+        for btn in (hide_btn, self.mute_btn):
+            btn.config(
+                bg=bg_color,
+                fg="white",
+                bd=0,
+                font=("Helvetica", 10),
+                activebackground="#5A2B1A",
+                activeforeground="white",
+                highlightthickness=0,
+                takefocus=0,
+            )
+        hide_btn.grid(row=0, column=0)
+        self.mute_btn.grid(row=1, column=0)  # under ➖: a slip up hides, it doesn't quit
         control_frame = tk.Frame(frame, bg=bg_color, highlightthickness=0, bd=0)
         control_frame.pack(pady=5)
         tk.Button(
@@ -265,6 +297,9 @@ class AudioPlayerScreen:
         )
 
     def open_fire_radio_window(self, event=None):
+        if self.queue_ui and self.queue_ui.win.winfo_exists():
+            self.queue_ui.win.lift()  # already open
+            return
         self.queue_ui = FireSideRadioQueueUI(
             self.state.get("queue", []),
             master=self.root,
@@ -272,6 +307,13 @@ class AudioPlayerScreen:
             on_add_url=self.handle_url_add,
             on_shuffle_queue=lambda: self.client.send_jam("shuffle"),
             on_remove=lambda key: self.client.send_jam("remove", key=key),
+            history=self.state.get("history", []),
+            on_move=lambda key, index: self.client.send_jam(
+                "move", key=key, index=index
+            ),
+            on_playlist=self.client.get_playlist,
+            on_add_many=lambda texts: self.client.send_jam("add_many", texts=texts),
+            on_error=self.client.show_error,
         )
         self.queue_ui.show()
 
@@ -354,6 +396,33 @@ class AudioPlayerScreen:
         new_y = self._drag_start_win_y + dy
         self.root.geometry(f"+{new_x}+{new_y}")
 
+    def hide(self):
+        """Put the campfire and its windows away; the music plays on. A taskbar button
+        brings them back (a borderless window gets none, so we get a border until then)."""
+        self.hidden_windows = [w for w in toplevels(self.root) if w.state() == "normal"]
+        for window in self.hidden_windows:
+            window.withdraw()
+        self.root.overrideredirect(False)
+        self.root.iconify()
+
+    def on_map(self, event):
+        """Back from the taskbar: borderless and on top again, with what hide() put away."""
+        # <Map> also fires for every widget on the stage, and for the stage itself
+        # while hide() is still iconifying it
+        if (
+            event.widget is not self.root
+            or self.hidden_windows is None
+            or self.root.state() != "normal"
+        ):
+            return
+        windows, self.hidden_windows = self.hidden_windows, None
+        self.root.overrideredirect(True)
+        self.root.wm_attributes("-topmost", True)
+        set_window_transparency(self.root, color=self.transparent_color, alpha=0.8)
+        for window in windows:
+            if window.winfo_exists():
+                window.deiconify()
+
     def toggle_play(self):
         """Play/pause the jam. Flips right away; the server's next update confirms it."""
         self.paused_position = self.get_current_pos()
@@ -402,7 +471,7 @@ class AudioPlayerScreen:
         self.play_btn.config(text="⏸️" if self.is_playing else "▶")
 
         if self.queue_ui and self.queue_ui.win.winfo_exists():
-            self.queue_ui.display_queue(state.get("queue", []))
+            self.queue_ui.display_queue(state.get("queue", []), state.get("history", []))
 
     def prev_song(self):
         self.client.send_jam("previous")
@@ -600,7 +669,29 @@ class AudioPlayerScreen:
                 return player
         return None
 
+    def toggle_mute(self):
+        """Muted: let go of the mic and close our mouth for everyone. Unmuted: listen again."""
+        self.muted = not self.muted
+        self.mute_btn.config(text="🔇" if self.muted else "🎤")
+        if self.muted:
+            self.voice_detector.stop()
+            self.set_talking(False)
+        else:
+            self.voice_detector.start()
+
     def _on_voice_state_change(self, is_talking):
+        """Mic thread: hand the change to the Tk thread."""
+        try:
+            self.root.after(0, self._voice_changed, is_talking)
+        except RuntimeError:  # mainloop isn't running yet (or anymore): keep listening
+            pass
+
+    def _voice_changed(self, is_talking):
+        if not self.muted:  # muted since: the mic was let go
+            self.set_talking(is_talking)
+
+    def set_talking(self, is_talking):
+        """Open or close our avatar's mouth, here and for the room."""
         self.is_talking = is_talking
         # Redraw local player with new mouth state
         self._update_local_player_mouth()
@@ -677,4 +768,12 @@ class AudioPlayerScreen:
             self.voice_detector.stop()
         # Stop fire sound loop
         self.stop_fire_sound()
-        self.root.destroy()
+        self.destroy_when_mic_free()
+
+    def destroy_when_mic_free(self, tries=20):
+        """Quit once the mic thread has let go (≤1 s), so PortAudio isn't shut down at exit
+        under a read. Waits with after(), not join(): the thread may need Tk to finish."""
+        if tries and self.voice_detector.is_alive():
+            self.root.after(50, self.destroy_when_mic_free, tries - 1)
+        else:
+            self.root.destroy()

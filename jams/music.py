@@ -1,10 +1,11 @@
 """
 Songs for the queue: fetch() turns what a friend typed in the add box (a Spotify track
 link, a YouTube / YouTube Music link, or a song name) into an audio file from YouTube,
-which the host then serves to the room.
+which the host then serves to the room. playlist() lists a playlist's songs as add-box texts.
 """
 
 import html
+import json
 import os
 import re
 import threading
@@ -28,6 +29,16 @@ YOUTUBE_LINK = re.compile(
     r"([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])",
     re.I,
 )
+YOUTUBE_PLAYLIST = re.compile(
+    r"(?:https?://)?(?:(?:www|m|music)\.)?(?:youtube\.com|youtu\.be)/\S*?[?&]list="
+    r"([A-Za-z0-9_-]{2,64})(?=[&#]|$)",
+    re.I,
+)
+SPOTIFY_PLAYLIST = re.compile(
+    r"(?:https?://)?open\.spotify\.com/(?:intl-[a-z-]+/)?(playlist|album)/"
+    r"([A-Za-z0-9]{22})(?![A-Za-z0-9])",
+    re.I,
+)
 YTDL = {"quiet": True, "no_warnings": True, "noprogress": True, "noplaylist": True}
 DOWNLOADING = {}  # video id -> lock: two adds of one song would write the same file
 
@@ -44,6 +55,16 @@ def parse(text):
     if not text:
         raise ValueError("Type a song name or paste a link")
     return "search", text
+
+
+def parse_playlist(text):
+    """A playlist link: ("youtube", list id), or ("playlist" or "album", Spotify id)."""
+    text = text.strip()
+    if m := YOUTUBE_PLAYLIST.match(text):
+        return "youtube", m[1]
+    if m := SPOTIFY_PLAYLIST.match(text):
+        return m[1].lower(), m[2]
+    raise ValueError("Paste a YouTube or Spotify playlist link")
 
 
 def spotify_tags(page):
@@ -140,3 +161,75 @@ def fetch(text, folder=DOWNLOADS_FOLDER):
         "duration_ms": duration_ms,
         **spotify,  # Spotify's names and art, for songs linked from there
     }
+
+
+def youtube_tracks(entries):
+    """A YouTube playlist's videos as add-box texts, minus private and deleted ones."""
+    tracks = []
+    for entry in entries:
+        video_id = entry.get("id") or ""
+        if entry.get("title") in ("[Private video]", "[Deleted video]"):
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+            continue
+        artist = entry.get("channel") or entry.get("uploader") or ""
+        tracks.append(
+            {
+                "title": entry.get("title") or "",
+                "artist": artist.removesuffix(" - Topic"),  # YouTube Music's artist channels
+                "text": f"https://youtu.be/{video_id}",
+            }
+        )
+    return tracks
+
+
+def youtube_playlist(list_id):
+    """A YouTube (Music) playlist's name and first 100 songs, without opening each video."""
+    url = f"https://www.youtube.com/playlist?list={list_id}"
+    try:
+        with yt_dlp.YoutubeDL({**YTDL, "extract_flat": True, "playlistend": 100}) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except yt_dlp.utils.DownloadError:
+        raise ValueError("Couldn't read that playlist") from None
+    return {"title": info.get("title") or "", "tracks": youtube_tracks(info.get("entries") or [])}
+
+
+def spotify_tracks(page):
+    """Name and songs of a Spotify playlist or album, from its embed page's JSON."""
+    try:
+        data = re.search(r'id="__NEXT_DATA__"[^>]*>(.*?)</script>', page, re.S)
+        entity = json.loads(data[1])["props"]["pageProps"]["state"]["data"]["entity"]
+        tracks = []
+        for song in entity["trackList"]:
+            m = re.fullmatch(r"spotify:track:([A-Za-z0-9]{22})", song.get("uri") or "")
+            if m:  # not a podcast episode or a local file
+                tracks.append(
+                    {
+                        "title": song["title"],
+                        "artist": song["subtitle"].replace("\xa0", " "),  # "A,\xa0B"
+                        "text": f"https://open.spotify.com/track/{m[1]}",
+                    }
+                )
+        return {"title": entity["name"], "tracks": tracks[:100]}
+    except (AttributeError, KeyError, TypeError, ValueError):  # no such list, or a new page layout
+        raise ValueError("Couldn't read that playlist") from None
+
+
+def spotify_playlist(kind, list_id):
+    """A Spotify playlist's or album's name and first 100 songs, with no account."""
+    # Its public embed page names the first 100 songs; the plain page only links 30 of them
+    url = f"https://open.spotify.com/embed/{kind}/{list_id}"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            return spotify_tracks(resp.read().decode("utf-8", "replace"))
+    except OSError:  # offline, timed out or turned away
+        raise ValueError("Couldn't read that playlist") from None
+
+
+def playlist(text):
+    """A YouTube or Spotify playlist (or Spotify album) link's name and songs, as add-box texts."""
+    kind, list_id = parse_playlist(text)
+    found = youtube_playlist(list_id) if kind == "youtube" else spotify_playlist(kind, list_id)
+    if not found["tracks"]:
+        raise ValueError("That playlist is empty")
+    return found

@@ -33,6 +33,9 @@ class Jam:
             "is_playing": self.is_playing,
             "progress_ms": self.position(now),
             "queue": self.queue[self.current + 1 :],
+            # ponytail: every song played this session rides along in each broadcast;
+            # send only the last few if a long session makes broadcasts slow
+            "history": self.queue[: self.current],
         }
 
     def _go(self, index, now):
@@ -75,6 +78,14 @@ class Jam:
         i = self._index(key)
         if i > self.current:
             del self.queue[i]
+
+    def move(self, key, index):
+        """Put an upcoming song at `index` of what's up next (0 = plays next)."""
+        index, i = int(index), self._index(key)
+        if i > self.current:
+            track = self.queue.pop(i)
+            index = min(max(index, 0), len(self.queue) - self.current - 1)
+            self.queue.insert(self.current + 1 + index, track)
 
     def shuffle(self):
         """Shuffle what's up next; the playing song keeps playing."""

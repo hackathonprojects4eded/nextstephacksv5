@@ -22,35 +22,43 @@ class VoiceDetector:
         self.sample_rate = sample_rate
         self.chunk_size = chunk_size
         self.callback = callback
-        self.is_talking = False
         self._stop_event = threading.Event()
         self._thread = None
 
     def start(self):
-        if self._thread is None or not self._thread.is_alive():
-            self._stop_event.clear()
-            self._thread = threading.Thread(target=self._run, daemon=True)
-            self._thread.start()
+        """Listen on a new thread until stop(). Each run has its own stop event, so a
+        run still winding down can neither swallow this start nor keep going."""
+        self.stop()
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run, args=(self._stop_event,), daemon=True
+        )
+        self._thread.start()
 
     def stop(self):
+        """Let go of the mic within ~0.1 s. Doesn't wait: the thread may be blocked
+        handing the callback's work to the caller's (Tk) thread."""
         self._stop_event.set()
-        if self._thread:
-            self._thread.join(timeout=1)
 
-    def _run(self):
+    def is_alive(self):
+        """True until the latest run has let go of the mic."""
+        return self._thread is not None and self._thread.is_alive()
+
+    def _run(self, stop_event):
+        is_talking = False  # each run starts silent
         try:
             with sd.InputStream(
                 channels=1, samplerate=self.sample_rate, blocksize=self.chunk_size
             ) as stream:
-                while not self._stop_event.is_set():
+                while not stop_event.is_set():
                     audio_chunk, _ = stream.read(self.chunk_size)
                     level = np.max(np.abs(audio_chunk))
                     new_state = level >= self.threshold
 
-                    if new_state != self.is_talking:
-                        self.is_talking = new_state
+                    if new_state != is_talking and not stop_event.is_set():
+                        is_talking = new_state
                         if self.callback:
-                            self.callback(self.is_talking)
+                            self.callback(is_talking)
                     time.sleep(0.05)  # Check ~20 times per second
         except Exception as e:
             print(f"VoiceDetector error: {e}")

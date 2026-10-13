@@ -169,6 +169,16 @@ class JamServer:
                     # Finding and fetching a song takes seconds: keep it off the event loop
                     track = off_loop(music.fetch, str(data.get("text", "")))
                     jam.add(track, time.time())
+                elif action == "add_many":
+                    texts = data.get("texts")
+                    if not (
+                        isinstance(texts, list)
+                        and 1 <= len(texts) <= 100
+                        and all(isinstance(text, str) for text in texts)
+                    ):
+                        return "Add 1 to 100 songs at a time"
+                    eventlet.spawn(self.add_many, room_code, jam, texts)
+                    return  # each song is broadcast as it lands
                 elif action in ("play", "pause", "next", "previous"):
                     getattr(jam, action)(time.time())
                 elif action == "seek":
@@ -177,6 +187,8 @@ class JamServer:
                     jam.jump(data["key"], time.time())
                 elif action == "remove":
                     jam.remove(data["key"])
+                elif action == "move":
+                    jam.move(data["key"], data["index"])
                 elif action == "shuffle":
                     jam.shuffle()
                 else:
@@ -184,6 +196,16 @@ class JamServer:
             except Exception as e:
                 return str(e)
             self.broadcast_jam(room_code)
+
+        @self.sio.event
+        def playlist(sid, data):
+            """A playlist link's songs, for the sender to pick from: {title, tracks} or {error}."""
+            if data.get("room_code") not in self.rooms:
+                return {"error": "Room not found"}
+            try:
+                return off_loop(music.playlist, str(data.get("text", "")))
+            except Exception as e:
+                return {"error": str(e)}
 
         @self.sio.event
         def user_talking_state(sid, data):
@@ -206,6 +228,22 @@ class JamServer:
             state = self.rooms[room_code]["jam"].state(time.time())
             state["seq"] = next(self.seq)
             self.sio.emit("jam_state", state, room=to or room_code)
+
+    def add_many(self, room_code: str, jam: Jam, texts):
+        """Fetch songs one at a time, in order, showing the room each one as it lands."""
+        # ponytail: imports run side by side and aren't limited, like spammed adds;
+        # queue them per room if friends' imports start hogging the host
+        for text in texts:
+            try:
+                track = off_loop(music.fetch, text)
+            except Exception as e:
+                track = None
+                print(f"Skipped {text[:100]!a}: {e!a}")  # ascii: any console can print it
+            if self.rooms.get(room_code, {}).get("jam") is not jam:
+                return  # the room closed (its code may be a new room's by now)
+            if track:
+                jam.add(track, time.time())
+                self.broadcast_jam(room_code)
 
     def serve_audio(self, environ, start_response):
         """Hand friends' apps the song files this host fetched (see jams/music.py)."""

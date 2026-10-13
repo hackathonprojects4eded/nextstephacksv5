@@ -5,7 +5,7 @@ A cozy "desktop pet" campfire overlay (Tkinter, Windows-first). Friends sit arou
 ## Commands (Windows + Git Bash, from the repo root)
 - Run: `uv run main.py`, or `run.bat` / `run.sh` (they `cd` to the repo first). Asset paths are relative to the root; `DOWNLOADS_FOLDER` is absolute (next to `main.py`) because it gets wiped.
 - Self-checks (offline, about 1 s each, each prints `ok`):
-  `uv run python -m jams.test_jam && uv run python -m jams.test_music && uv run python -m jams.test_player && uv run python -m jams.test_room_code`
+  `uv run python -m jams.test_jam && uv run python -m jams.test_music && uv run python -m jams.test_player && uv run python -m jams.test_room_code && uv run python -m jams.test_server`
   Always use `-m` from the root: `python jams/test_jam.py` fails with `No module named 'jams'`.
 - Don't launch `main.py` from a session unless asked: at startup it opens borderless topmost windows, the mic and the speakers. Check work with the self-checks.
 - Headless room server, same as the host's server thread: `uv run python -m jams.server` (binds port 5000 and blocks).
@@ -16,12 +16,14 @@ A cozy "desktop pet" campfire overlay (Tkinter, Windows-first). Friends sit arou
 - **Server**: the host's app runs the Socket.IO server (`jams/server.py`, python-socketio on eventlet) on a thread started by `screens/loading.py`, and connects to it at `127.0.0.1:LOCAL_PORT`.
 - **Join codes** (`jams/room_code.py`): a room's code *is* the host's LAN IPv4 in base 36 (7 chars, e.g. `192.168.68.56` → `1HGEED4`). A friend types it on the join sign and their app connects to `<decoded ip>:LOCAL_PORT`. One room per server; no IP is configured anywhere.
 - **Rooms**: the server owns one `Jam` (`jams/jam.py`) per room. Any member sends `jam_cmd`; the server changes the `Jam` and broadcasts `jam_state` (`Jam.state()` plus an increasing `seq`).
-- **Jam**: `queue` keeps played songs too (so `previous` works); `state()` sends only the upcoming ones. Each entry gets a `key`, so two copies of a song differ; the UI names songs by `key`, never by index.
+- **Jam**: `queue` keeps played songs too (so `previous` works); `state()` sends the upcoming ones as `queue` and the played ones as `history` (oldest first; the client shows the newest 50). Each entry gets a `key`, so two copies of a song differ; the UI names songs by `key`, never by index.
+- **Importing**: `add_many` answers at once, then `JamServer.add_many` (a spawned greenthread) fetches the songs one at a time through `off_loop`, adding and broadcasting each and skipping failures. It stops once `self.rooms` no longer holds the same `Jam`, because room codes get reused.
 - **Ticker**: the `tick_rooms` greenthread checks every 0.5 s and moves a room on when its song ends.
 - **Adding a song**: `music.fetch` runs on a plain thread via `off_loop` while the hub keeps serving. Not `eventlet.tpool`: with the hub off the main thread, tpool's atexit hook prints a `greenlet.error` traceback.
 - **Fetching** (`jams/music.py`):
   - A Spotify track link: read the public page's `og:`/`music:` meta tags (Python's default User-Agent gets them; a browser's gets an empty app shell), search YouTube Music for "artist title", and keep Spotify's names and art.
   - A YouTube link gives its 11-char video id. Anything else is a YouTube Music "songs" search via yt-dlp.
+  - Playlists (`music.playlist`, listing only): YouTube / YouTube Music `list=` ids via yt-dlp `extract_flat` (first 100; private/deleted dropped, " - Topic" stripped). Spotify playlists and albums come from the public embed page `open.spotify.com/embed/{playlist|album}/<id>` (its `__NEXT_DATA__` JSON, first 100 songs, no account). Each track becomes a song link that `fetch` takes.
   - yt-dlp saves `bestaudio` as-is to `downloads/<11-char id>.<ext>` (no ffmpeg needed). PyAV reads the exact duration.
 - **Serving**: `JamServer.serve_audio`, the WSGI app behind Socket.IO, serves `GET /audio/<file>` from `downloads/`.
 - **Playback** (`jams/player.py`): every app, the host's too, plays the song itself. PyAV decodes the whole song to 44.1 kHz int16 stereo in RAM (about 10 MB/min), and a sounddevice output callback plays it.
@@ -31,11 +33,13 @@ A cozy "desktop pet" campfire overlay (Tkinter, Windows-first). Friends sit arou
 - **Ordering** (`jams/client.py`): python-socketio runs each event on its own thread. `jam_state` applies a state only if its `seq` is newer than the last one, under `jam_lock`, then hands the UI work to `root.after(0, ...)`.
 - **Timings** (owner's laptop): adding a song takes about 4–5 s (lookup + download). A decode takes 0.4–1.4 s depending on CPU state: Windows moves busy background processes to slower cores after a few seconds.
 - **Screens**: `main.py` builds `Client(root)`, whose `AudioPlayerScreen` is the stage on the `tk.Tk()` root (mic, speakers and fire crackle start right away). Then `LandingScreen` → `CharacterScreen` → host: `LoadingScreen` → `JoinHostCodeScreen`; join: `JoinHostCodeScreen`. Each is a borderless topmost `Toplevel` that destroys itself and builds the next.
+- **Stage buttons**: 🎤/🔇 stops and restarts the `VoiceDetector`, which releases the mic, and tells the room `is_talking=0` once. ➖ hides the stage and every open `Toplevel` to the taskbar: it turns `overrideredirect` off and calls `iconify()`, then root's `<Map>` (only when its `state()` is `normal`) puts back `overrideredirect`, `-topmost`, the transparency and the hidden windows.
+- **Queue window** (`screens/queue_screen.py`): drag an upcoming row to send `move`; it reorders locally so the confirming state doesn't redraw. 🕘 toggles past songs (clicking one = `jump`). A playlist link in the add box (YouTube `list=` without `v=`, Spotify `/playlist/` or `/album/`) opens a playlist view with + per song and "Add all" (`add_many`). States redraw only the view that's showing.
 
 ## Socket.IO events
-- Client → server: `create_room`, `join_room`, `jam_cmd`, `user_talking_state`.
+- Client → server: `create_room`, `join_room`, `jam_cmd`, `user_talking_state`, `playlist` (`{room_code, text}`, acked with `{title, tracks: [{title, artist, text}]}` or `{error}`).
 - Server → client: `room_created`, `room_joined`, `user_joined`, `user_left`, `players_updated`, `jam_state`, `user_talking_update`, `error`.
-- `jam_cmd` is `{room_code, action, ...}`. Actions: `add` (`text`), `play`, `pause`, `next`, `previous`, `seek` (`position_ms`), `jump` and `remove` (`key`), `shuffle`.
+- `jam_cmd` is `{room_code, action, ...}`. Actions: `add` (`text`), `play`, `pause`, `next`, `previous`, `seek` (`position_ms`), `jump` and `remove` (`key`), `shuffle`, `move` (`key`, `index` into the upcoming list, 0 = next), `add_many` (`texts`: 1-100 add-box texts).
 - `jam_cmd` answers through the Socket.IO ack: an error string or `None`, which the client shows the sender in a warning box. Any exception's text reaches the user, so raise `ValueError("a friendly message")` in `jam.py`/`music.py`.
 
 ## Trust boundaries
@@ -47,7 +51,7 @@ Room members are other people's computers sending arbitrary payloads.
 - Known gap: the server doesn't check that `jam_cmd` or `user_talking_state` senders are in the room. The 6-char room code is the only gate.
 
 ## Conventions
-- Tk is not thread-safe. Socket, mic and audio threads marshal UI work with `root.after(0, ...)`. Known violators to fix when touched: `user_joined`, `user_left` and `user_talking_update` in `jams/client.py`, and `_on_voice_state_change` (mic thread) in `screens/audio_player_screen.py`.
+- Tk is not thread-safe. Socket, mic and audio threads marshal UI work with `root.after(0, ...)`. A Tk call from another thread blocks until the Tk thread services it, so the Tk thread never joins a thread that may be waiting on Tk. That's why `VoiceDetector.stop()` doesn't join; `on_close` polls with `after()` instead.
 - The server isn't monkey-patched, so a blocking call in a handler stalls every room. Slow work goes through `off_loop`. `Jam`s are only touched by greenthreads on the hub, so they need no lock; never touch one from an `off_loop` thread.
 - A new playback feature is a `Jam` method (it takes `now`; it never calls `time.time()`) with asserts in `jams/test_jam.py`, a branch in `jam_cmd`, and `client.send_jam(...)` from the UI. The UI shows what `jam_state` says (`render_state`).
 - Cover art: call `fetch_cover(url)` off the Tk thread (it fills a cache), then `cover_photo(url, size)` on it.
@@ -71,6 +75,8 @@ Room members are other people's computers sending arbitrary payloads.
   - `utils/crop.py` and `utils/points.py` do their work at import (`crop.py` rewrites `assets/notes/crop/`). Never import them.
   - `songs/` holds unused spotdl-era mp3s; nothing reads or cleans it.
 - `downloads/` (gitignored) lasts one session: `main.py` wipes it at startup and in a `finally` (❎, Ctrl+C, a crash). A closed terminal or a Task Manager kill skips the `finally`, so the next startup wipes it. Files still being written at exit are locked on Windows and wait for the next startup too.
+- The Spotify embed page is undocumented: if Spotify changes it, playlist lookups say "Couldn't read that playlist" and the canned self-check won't notice. Re-check live with e.g. `https://open.spotify.com/album/18pzJc8GyrVQmunRXrY3ch`. YouTube Mixes (`list=RD…`) and personal lists (WL/LL) can't be read.
+- `FireSideRadioQueueUI` binds `<MouseWheel>` with `bind_all`, so after the queue window closes, scrolling prints a `TclError` traceback (harmless).
 - One app per checkout: a second app, or `python -m jams.server`, on the same computer shares `downloads/`, and those wipes delete its songs.
 
 ## Why not Spotify (don't retry these routes)

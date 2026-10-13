@@ -6,6 +6,7 @@ import socketio
 
 from jams.player import Player
 from screens.audio_player_screen import AudioPlayerScreen
+from screens.queue_screen import MAX_PAST_SONGS
 from utils.song import fetch_cover
 
 
@@ -83,7 +84,9 @@ class Client:
             )
 
             # Add player to audio player screen
-            self.audio_player.add_player(username, color_idx, position_idx)
+            self.root.after(
+                0, lambda: self.audio_player.add_player(username, color_idx, position_idx)
+            )
 
         @self.sio.event
         def user_left(data):
@@ -92,7 +95,7 @@ class Client:
             print(f"User {username} left the room")
 
             # Remove player from audio player screen
-            self.audio_player.remove_player(username)
+            self.root.after(0, lambda: self.audio_player.remove_player(username))
 
         @self.sio.event
         def players_updated(data):
@@ -112,14 +115,20 @@ class Client:
             for track in filter(None, [state["track"], *state["queue"]]):
                 fetch_cover(track["cover_url"])  # download art off the Tk thread
             self.root.after(0, lambda: self.render_if_latest(state, received_at))
+            # ponytail: Past Songs opened in the seconds right after joining can still
+            # fetch some art on the Tk thread; hand history over only once fetched if it stalls
+            for track in state.get("history", [])[-MAX_PAST_SONGS:]:
+                fetch_cover(track["cover_url"])  # mostly cached: they were queued once
 
         @self.sio.event
         def user_talking_update(data):
             """Update a player's talking state in the UI when received from server."""
             username = data.get("username")
             is_talking = bool(data.get("is_talking", 0))
-            if hasattr(self.audio_player, "update_remote_talking_state"):
-                self.audio_player.update_remote_talking_state(username, is_talking)
+            self.root.after(
+                0,
+                lambda: self.audio_player.update_remote_talking_state(username, is_talking),
+            )
 
     def create_room(self, username, color):
         """Create a new jam room as host."""
@@ -183,8 +192,23 @@ class Client:
                 {"room_code": self.room_code, "action": action, **data},
                 callback=done,
             )
-        elif action == "add":
+        elif action in ("add", "add_many"):
             done("Host or join a jam first")
+
+    def get_playlist(self, text, callback):
+        """Look up a playlist link's songs. callback gets {"title", "tracks"} or {"error"}, on the Tk thread."""
+
+        def done(result=None):
+            if not isinstance(result, dict):
+                result = {"error": "Couldn't read that playlist"}
+            self.root.after(0, lambda: callback(result))
+
+        if self.connected and self.room_code:
+            self.sio.emit(
+                "playlist", {"room_code": self.room_code, "text": text}, callback=done
+            )
+        else:
+            done({"error": "Host or join a jam first"})
 
     def _jam_cmd_done(self, error=None, added=False):
         if added:  # the add button shows ⏬ until its own song is in
